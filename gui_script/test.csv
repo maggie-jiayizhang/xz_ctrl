@@ -1,0 +1,9 @@
+move x 100 3000
+movetrap x 300 200
+wait 100
+# loop
+loop 10
+move x 100 300
+move x -100 300
+wait 100
+endloop
