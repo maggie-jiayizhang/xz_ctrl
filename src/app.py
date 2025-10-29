@@ -69,33 +69,37 @@ class MotorControllerGUI:
         control_frame.pack(fill=tk.X, side=tk.TOP)
         ttk.Label(control_frame, text="Motor Script Editor", font=("Arial", 14, "bold")).pack(side=tk.LEFT)
         
-        # Make Script button
-        ttk.Button(
-            control_frame,
-            text="Make Script",
-            command=self.make_script
-        ).pack(side=tk.RIGHT, padx=5)
-
-        # Check Code button
-        ttk.Button(
-            control_frame,
-            text="Check Code",
-            command=self.check_code
-        ).pack(side=tk.RIGHT, padx=5)
-
-        # Load CSV button
-        ttk.Button(
-            control_frame,
-            text="Load CSV",
-            command=self.load_from_csv
-        ).pack(side=tk.RIGHT, padx=5)
-
-        # Save to CSV button
-        ttk.Button(
+        # Save to CSV button (S)
+        self.save_btn = ttk.Button(
             control_frame,
             text="Save CSV",
             command=self.save_to_csv
-        ).pack(side=tk.RIGHT, padx=5)
+        )
+        self.save_btn.pack(side=tk.RIGHT, padx=5)
+
+        # Load CSV button (O)
+        self.load_btn = ttk.Button(
+            control_frame,
+            text="Load CSV",
+            command=self.load_from_csv
+        )
+        self.load_btn.pack(side=tk.RIGHT, padx=5)
+
+        # Check Code button (E)
+        self.check_btn = ttk.Button(
+            control_frame,
+            text="Check Code",
+            command=self.check_code
+        )
+        self.check_btn.pack(side=tk.RIGHT, padx=5)
+
+        # Make Script button (no shortcut yet)
+        self.make_btn = ttk.Button(
+            control_frame,
+            text="Make Script",
+            command=self.make_script
+        )
+        self.make_btn.pack(side=tk.RIGHT, padx=5)
 
 
         # Separator
@@ -214,6 +218,30 @@ endloop"""
         # Status bar
         self.status_bar = ttk.Label(self.root, text="Ready", relief=tk.SUNKEN, anchor=tk.W)
         self.status_bar.pack(fill=tk.X, side=tk.BOTTOM)
+        
+        # Bind keyboard events to show/hide shortcut hints
+        import platform
+        self.root.bind_all("<KeyPress-Control_L>", self._show_shortcuts)
+        self.root.bind_all("<KeyRelease-Control_L>", self._hide_shortcuts)
+        self.root.bind_all("<KeyPress-Control_R>", self._show_shortcuts)
+        self.root.bind_all("<KeyRelease-Control_R>", self._hide_shortcuts)
+        if platform.system() == "Darwin":  # Mac
+            self.root.bind_all("<KeyPress-Command>", self._show_shortcuts)
+            self.root.bind_all("<KeyRelease-Command>", self._hide_shortcuts)
+    
+    def _show_shortcuts(self, event=None):
+        """Show keyboard shortcut hints on buttons"""
+        self.save_btn.config(text="Save CSV (S)")
+        self.load_btn.config(text="Load CSV (O)")
+        self.check_btn.config(text="Check Code (E)")
+        self.toggle_hint_btn.config(text="Hide Hints (H)")
+    
+    def _hide_shortcuts(self, event=None):
+        """Hide keyboard shortcut hints on buttons"""
+        self.save_btn.config(text="Save CSV")
+        self.load_btn.config(text="Load CSV")
+        self.check_btn.config(text="Check Code")
+        self.toggle_hint_btn.config(text="Hide Hints")
     
     def _toggle_hints(self, event=None):
         """Toggle hint panel visibility"""
