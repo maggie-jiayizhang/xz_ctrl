@@ -1,94 +1,169 @@
-# Robot Controller (X/Z Steppers)
+# Robot Controller - Arduino Stepper Motor Control with Python GUI
 
-This project provides:
-- A minimal Python GUI to upload and run simple stepper "programs" on an Arduino.
-- An Arduino sketch that controls two stepper motors (X and Z axes) via step/dir drivers (e.g., A4988/DRV8825) and interprets a tiny program protocol.
+A complete system for controlling X/Z stepper motors via Arduino using a Python GUI with real-time scripting, syntax highlighting, and serial communication.
 
 ## Features
-- Program-based control: define oscillation blocks per axis with repeats
-- Loop whole program or run once
-- Configurable steps-per-unit (to write programs in human units)
-- Connect/disconnect to a COM port with basic logs
-- Arduino connectivity and status check (PING/STATUS) directly from the GUI
 
-## Wiring assumptions
-- Two step/dir drivers (A4988/DRV8825 or similar)
-- Default pins (can be edited in the Arduino sketch):
-  - X: STEP=2, DIR=5
-  - Z: STEP=3, DIR=6
-- Shared EN pin optional (set to -1 to disable)
-- No limit switches by default (homing not implemented). Add safety as needed.
+### Python GUI (`src/app.py`)
+- **Script Editor** with syntax highlighting for commands (move, speed, wait, loop/endloop)
+- **Line numbers** for easy reference
+- **Loop expansion** - write `loop N ... endloop` and it expands automatically before sending
+- **Script validation** - checks syntax before sending to Arduino
+- **Save/Load** scripts for reuse (Ctrl+S / Ctrl+O)
+- **Real-time console** - monitor Arduino responses
+- **Keyboard shortcuts** - hold Ctrl to see shortcuts on buttons
+  - Ctrl+C: Connect
+  - Ctrl+R: Send (Run)
+  - Ctrl+E: Emergency Stop
+  - Ctrl+S: Save
+  - Ctrl+O: Load (Open)
+  - Ctrl+L: Clear console
 
-## Program protocol (ASCII lines)
-- One command per line, newline-terminated (\n)
-- Upload sequence:
-  - `PROG BEGIN`
-  - One or more block lines:
-    - `OSCIL <axis> <neg_steps> <pos_steps> SPD <steps_per_s> REP <n>`
-      - axis: X or Z
-      - neg_steps: negative integer for the first half move (e.g., left/down)
-      - pos_steps: positive integer for the second half move (e.g., right/up)
-      - REP n: number of oscillation cycles; -1 for infinite
-    - Alternatively in units from the GUI editor (converted client-side):
-      - `OSCIL X LENL <units> LENR <units> SPD_U <units_per_s> REP <n>`
-  - `PROG END LOOP` or `PROG END ONCE`
-  - `RUN`
-- Other:
-  - `PING` → `PONG`
-  - `STOP` → attempt to stop gracefully
-  - Firmware responses: `OK`, `DONE`, `STOPPED`, `ERR <message>`, `READY`
+### Arduino Firmware (`src/interaction.ino`)
+- **Command queue** (128 commands) for smooth execution
+- **Real-time parsing** - accepts commands as stream
+- **Emergency stop** - immediate halt with `stop` or `!`
+- **Auto power-down** - disables stepper drivers when idle to keep motors cool
+- Supports commands:
+  - `move x|z D` - move axis by D mm
+  - `speed x|z S` - set speed to S mm/s  
+  - `wait T` - wait T milliseconds
+  - `stop` or `!` - emergency stop
 
-## Calibrating steps per unit
-Update `steps_per_unit_x` and `steps_per_unit_z` in `arduino/stepper_controller/stepper_controller.ino` or in the Python GUI settings field.
-- For lead screw-driven Z: steps_per_rev * microsteps / lead
-- For belt-driven X: steps_per_rev * microsteps / (pulley_circumference)
+## Hardware Setup
 
-## Quick start (Windows, PowerShell)
+### Wiring (CNC Shield V3 defaults)
+- **X-axis stepper**: STEP=2, DIR=5
+- **Z-axis stepper**: STEP=4, DIR=7
+- **Enable pin**: 8 (shared, LOW=enabled)
+- **Microstepping**: 1/32 configured (adjust in firmware)
 
-1) Install Python deps:
+### Calibration
+Edit in `src/interaction.ino`:
+```cpp
+const float BASE_STEPS_PER_MM = 20.0f;  // Adjust for your mechanics
+#define MICROSTEP_X 32
+#define MICROSTEP_Z 32
+```
 
+## Quick Start
+
+### 1. Install Python Dependencies
 ```powershell
 pip install -r requirements.txt
 ```
 
-2) Upload Arduino sketch:
-- Open `arduino/stepper_controller/stepper_controller.ino` in Arduino IDE
-- Install the AccelStepper library (Library Manager → search "AccelStepper" by Mike McCauley)
-- Select correct board and COM port, then Upload
+### 2. Upload Arduino Firmware
+1. Open `src/interaction.ino` in Arduino IDE
+2. Install **AccelStepper** library (Tools → Manage Libraries → search "AccelStepper")
+3. Select board and COM port
+4. Upload
 
-3) Run the GUI:
-
+### 3. Run the GUI
 ```powershell
-python src/app.py
+python src\app.py
 ```
 
-4) Use the GUI:
-- Click "Check Arduino" to verify your board is connected. The status indicator will show RUNNING/READY/IDLE.
-- Write a simple program in the editor (move/loop/wait commands) and use the buttons to validate and make a CSV for serial.
+### 4. Use the Application
+1. Click **Connect** (or Ctrl+C) and select your Arduino's COM port
+2. Edit the script in the editor (example provided)
+3. Click **Send to Arduino** (or Ctrl+R) to validate and execute
+4. Monitor the console for real-time feedback
+5. Use **STOP** (or Ctrl+E) for emergency halt
 
-### Arduino status check
+## Example Script
 
-- The GUI sends PING (expects PONG) and queries STATUS; firmware replies with one of:
-  - `STATUS RUNNING` (a program is executing)
-  - `STATUS READY` (a program is loaded but not running)
-  - `STATUS IDLE` (no program is loaded)
+```python
+# Set speeds for both axes
+speed x 5.0
+speed z 5.0
 
+# Initial positioning
+move x 10
+wait 500
+move z -5
 
-Example program:
+# Oscillate X axis 3 times
+loop 3
+  move x 10
+  wait 200
+  move x -10
+endloop
+```
+
+## Command Reference
+
+| Command | Format | Example | Description |
+|---------|--------|---------|-------------|
+| `move` | `move <axis> <distance>` | `move x 100` | Move axis by distance (mm) |
+| `speed` | `speed <axis> <value>` | `speed z 3.5` | Set axis speed (mm/s) |
+| `wait` | `wait <time>` | `wait 1000` | Pause for milliseconds |
+| `loop` | `loop <count>` | `loop 5` | Start loop block |
+| `endloop` | `endloop` | `endloop` | End loop block |
+| `#` | `# comment` | `# This is a comment` | Comment line |
+
+### Notes
+- Loops can be nested
+- Loops are expanded in the GUI before sending to Arduino
+- Distance values can be negative for reverse direction
+- Speed must be positive (>0)
+
+## Project Structure
 
 ```
-# X: left 100 steps, right 80 steps at 400 steps/s, repeat 300 cycles
-OSCIL X -100 80 SPD 400 REP 300
+robot_controller/
+├── src/
+│   ├── app.py              # Python GUI application
+│   ├── serial_comm.py      # Arduino serial communication
+│   ├── validator.py        # Script validation
+│   ├── script_parser.py    # Script parsing utilities
+│   ├── make_script_util.py # Script generation helpers
+│   └── interaction.ino     # Arduino firmware (CURRENT)
+├── arduino/
+│   └── stepper_controller/ # Alternative firmware (oscillation-based)
+├── gui_script/             # Example scripts
+├── requirements.txt        # Python dependencies
+└── README.md
 
-# Z: up/down by units (converted using Z steps/unit), 5 units/s, run forever
-OSCIL Z LENL 50 LENR 30 SPD_U 5 REP -1
 ```
 
-## Notes
-- Ensure your power supply and current limits are set correctly for your motors/drivers.
-- Consider adding limit switches and homing for safety.
-- For infinite block repeats (REP -1) the program will continue until you press "Stop".
-- If you see `ERR` responses, check wiring, COM settings, and that the Arduino is running the provided firmware.
+## Queue Capacity
+
+The Arduino firmware has a command queue set to **128 commands** (adjustable in firmware):
+
+```cpp
+#define QUEUE_CAP 128  // Increase if you need longer scripts
+```
+
+If you see `[queue] full (QUEUE_CAP=128)` in the console, either:
+- Reduce script length
+- Increase `QUEUE_CAP` in `src/interaction.ino` and re-upload
+
+## Safety Notes
+
+⚠️ **Important:**
+- Ensure proper power supply and current limits for your stepper drivers
+- No limit switches implemented - add your own safety limits
+- Emergency stop (Ctrl+E or `!`) provides immediate halt
+- GUI automatically sends stop signal when closing (if connected)
+- Motors are powered down when idle to prevent overheating
+
+## Troubleshooting
+
+**Motors not moving?**
+- Verify correct firmware uploaded (`src/interaction.ino`, not `arduino/stepper_controller`)
+- Check wiring and power supply
+- Ensure microstepping settings match your driver configuration
+
+**Queue full errors?**
+- Reduce loop counts or script length
+- Increase `QUEUE_CAP` in firmware and re-upload
+
+**Connection issues?**
+- Check COM port in Device Manager
+- Ensure no other software is using the serial port
+- Verify baud rate is 115200
 
 ## License
+
 MIT
