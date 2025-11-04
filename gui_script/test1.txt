@@ -1,0 +1,23 @@
+### example script ###
+
+# set speed
+speed x 5
+speed z 5
+
+# single moves
+move x 30
+move z -10
+
+# looping
+loop 5
+move x -10
+move x 10
+# wait for 5 seconds
+wait 500 
+move z 10
+move z -10
+endloop
+
+# end
+move x -30
+move z 10

@@ -1,0 +1,393 @@
+#include <AccelStepper.h>
+#include <ctype.h>
+#include <string.h>
+#include <stdint.h>
+
+/* =========================
+   1) COMMAND TYPES & QUEUE
+   ========================= */
+
+// ---- Command enums FIRST ----
+enum CmdType : uint8_t { CMD_NONE=0, CMD_MOVE, CMD_SPEED, CMD_WAIT, CMD_STOP };
+enum Axis    : uint8_t { AX_X=0, AX_Z=1, AX_NONE=2 };
+
+// value: steps (MOVE), speed*1000 (SPEED), ms (WAIT)
+struct Command {
+  uint8_t type;  // CmdType
+  uint8_t axis;  // Axis
+  int32_t value; // payload
+};
+
+// ---- Queue storage & funcs NEXT ----
+#define QUEUE_CAP 128                      // increased to 128 for long scripts
+static Command q[QUEUE_CAP];
+static uint8_t qHead=0, qTail=0;
+
+inline bool qEmpty(){ return qHead==qTail; }
+inline bool qFull(){ return (uint8_t)(qTail+1)%QUEUE_CAP==qHead; }
+inline void qClear(){ qHead=qTail=0; }
+
+bool enqueue(const Command& c){
+  if (qFull()) return false;
+  q[qTail] = c;
+  qTail = (uint8_t)(qTail + 1) % QUEUE_CAP;
+  return true;
+}
+
+bool qDequeue(Command &c){
+  if (qEmpty()) return false;
+  c = q[qHead];
+  qHead = (uint8_t)(qHead + 1) % QUEUE_CAP;
+  return true;
+}
+
+/* =========================
+   2) HARDWARE / CONSTANTS
+   ========================= */
+
+// Pins (CNC Shield V3 defaults)
+#define X_STEP_PIN 2
+#define X_DIR_PIN  5
+#define Z_STEP_PIN 4
+#define Z_DIR_PIN  7
+#define ENABLE_PIN 8   // shared enable (LOW = on)
+
+// Mechanics / Microstepping
+#define MICROSTEP_X 32
+#define MICROSTEP_Z 32   // Z now at 1/32
+const float BASE_STEPS_PER_MM = 20.0f; // full-step steps/mm of your mechanics
+
+// Derived
+const float STEPS_PER_MM_X = BASE_STEPS_PER_MM * MICROSTEP_X;
+const float STEPS_PER_MM_Z = BASE_STEPS_PER_MM * MICROSTEP_Z;
+
+// Defaults (runtime changeable via serial)
+float speed_mm_s_X = 2.0f;
+float speed_mm_s_Z = 2.0f;
+const float accel_mm_s2_X = 5.0f;
+const float accel_mm_s2_Z = 5.0f;
+
+// AccelStepper
+AccelStepper stepperX(AccelStepper::DRIVER, X_STEP_PIN, X_DIR_PIN);
+AccelStepper stepperZ(AccelStepper::DRIVER, Z_STEP_PIN, Z_DIR_PIN);
+
+// Enable gating (keep cool)
+bool driversEnabled = false;
+inline void enableDrivers(bool on){
+  if (on != driversEnabled) {
+    digitalWrite(ENABLE_PIN, on ? LOW : HIGH); // LOW = enabled
+    driversEnabled = on;
+  }
+}
+
+/* =========================
+   3) RUNTIME STATE
+   ========================= */
+
+bool cmdActive=false;
+Command curr;
+bool  waiting=false;
+unsigned long waitUntil=0;
+uint8_t movingAxis=AX_NONE;
+
+/* =========================
+   4) EMERGENCY STOP (IMMEDIATE)
+   ========================= */
+
+void emergencyStop(const __FlashStringHelper* reason /*=nullptr*/) {
+  if (!reason) reason = F("STOP");
+
+  // Request decelerating stop
+  stepperX.stop();
+  stepperZ.stop();
+
+  // Force target = current so distanceToGo() == 0 (hard snap)
+  long cx = stepperX.currentPosition();
+  long cz = stepperZ.currentPosition();
+  stepperX.setCurrentPosition(cx);
+  stepperZ.setCurrentPosition(cz);
+  stepperX.moveTo(cx);
+  stepperZ.moveTo(cz);
+
+  // Clear any pending commands/state
+  qClear();
+  cmdActive   = false;
+  waiting     = false;
+  movingAxis  = AX_NONE;
+
+  // Power down to keep cool
+  enableDrivers(false);
+
+  Serial.print(F("[exec] ")); Serial.print(reason); Serial.println(F(": EMERGENCY HALT, queue cleared"));
+}
+
+
+/* =========================
+   5) PARSER UTILITIES
+   ========================= */
+
+static inline void skipSpaces(const char *&p){ while(*p && isspace((unsigned char)*p)) ++p; }
+
+// case-insensitive match at start; advances p on success
+static inline bool ieq(const char* &p, const char* kw){
+  const char* s=p;
+  while(*kw && *s){
+    if (tolower((unsigned char)*s) != tolower((unsigned char)*kw)) return false;
+    ++s; ++kw;
+  }
+  if (*kw==0){ p=s; return true; }
+  return false;
+}
+
+// integer (supports +/-)
+static bool parseNumber(const char *&p, long &out){
+  skipSpaces(p);
+  bool neg=false; if(*p=='+'||*p=='-'){ neg=(*p=='-'); ++p; }
+  if(!isdigit((unsigned char)*p)) return false;
+  long v=0;
+  while(isdigit((unsigned char)*p)){ v = v*10 + (*p-'0'); ++p; }
+  out = neg ? -v : v;
+  return true;
+}
+
+// float to fixed-point (*1000)
+static bool parseFloat1000(const char *&p, long &out){
+  skipSpaces(p);
+  bool neg=false; if(*p=='+'||*p=='-'){ neg=(*p=='-'); ++p; }
+  if(!(isdigit((unsigned char)*p) || *p=='.')) return false;
+  long intPart=0, fracPart=0, fracPow=1;
+  while(isdigit((unsigned char)*p)){ intPart=intPart*10+(*p-'0'); ++p; }
+  if(*p=='.'){
+    ++p;
+    while(isdigit((unsigned char)*p) && fracPow<1000){ fracPart=fracPart*10+(*p-'0'); fracPow*=10; ++p; }
+    while(isdigit((unsigned char)*p)) ++p; // skip extra decimals
+  }
+  long scaled = intPart*1000 + (fracPow>1 ? (fracPart*(1000/fracPow)) : 0);
+  out = neg ? -scaled : scaled;
+  return true;
+}
+
+inline long mm_to_steps(long mm, bool isX){
+  float stepsPerMM = isX ? STEPS_PER_MM_X : STEPS_PER_MM_Z;
+  return (long)((float)mm * stepsPerMM);
+}
+
+/* =========================
+   6) CLAUSE PARSER (stream)
+   ========================= */
+
+char clauseBuf[64];
+uint8_t clauseLen=0;
+
+void parseClause(char *buf){
+  const char *p = buf;
+  skipSpaces(p);
+  if(*p==0) return;
+
+  // stop  (IMMEDIATE, do not enqueue)
+  {
+    const char* t = p;
+    if (ieq(t, "stop")) {
+      emergencyStop(F("STOP"));
+      return;
+    }
+  }
+
+  // wait T
+  {
+    const char* t=p;
+    if(ieq(t,"wait")){
+      long T=0;
+      if(!parseNumber(t,T)){ Serial.println(F("[parse] wait T?")); return; }
+      if(T<0) T=0;
+      enqueue(Command{CMD_WAIT, AX_NONE, (int32_t)T});
+      Serial.print(F("[queued] wait ")); Serial.println((unsigned long)T);
+      return;
+    }
+  }
+
+  // move x/z D
+  {
+    const char* t=p;
+    if(ieq(t,"move")){
+      skipSpaces(t);
+      if(*t==0){ Serial.println(F("[parse] move axis?")); return; }
+      char ax = tolower((unsigned char)*t); ++t;
+      if(ax!='x' && ax!='z'){ Serial.println(F("[parse] axis x/z?")); return; }
+      long D=0;
+      if(!parseNumber(t,D)){ Serial.println(F("[parse] move mm?")); return; }
+      long steps = mm_to_steps(D, ax=='x');
+      if(!enqueue(Command{CMD_MOVE, (uint8_t)(ax=='x'?AX_X:AX_Z), steps}))
+        Serial.println(F("[queue] full (QUEUE_CAP=128). Increase QUEUE_CAP in firmware if needed."));
+      else{
+        Serial.print(F("[queued] move ")); Serial.print((ax=='x')?'X':'Z');
+        Serial.print(F(" ")); Serial.print(D); Serial.print(F(" mm ("));
+        Serial.print(steps); Serial.println(F(" steps)"));
+      }
+      return;
+    }
+  }
+
+  // speed x/z S
+  {
+    const char* t=p;
+    if(ieq(t,"speed")){
+      skipSpaces(t);
+      if(*t==0){ Serial.println(F("[parse] speed axis?")); return; }
+      char ax = tolower((unsigned char)*t); ++t;
+      long S1000=0;
+      if(!parseFloat1000(t,S1000)){ Serial.println(F("[parse] speed mm/s?")); return; }
+      if(!enqueue(Command{CMD_SPEED, (uint8_t)(ax=='x'?AX_X:AX_Z), (int32_t)S1000}))
+        Serial.println(F("[queue] full (QUEUE_CAP=128). Increase QUEUE_CAP in firmware if needed."));
+      else{
+        Serial.print(F("[queued] speed ")); Serial.print((ax=='x')?'X':'Z');
+        Serial.print(F(" ")); Serial.print(S1000/1000); Serial.print('.');
+        Serial.println((int)(abs(S1000)%1000));
+      }
+      return;
+    }
+  }
+
+  Serial.println(F("[parse] unknown clause"));
+}
+
+/* =========================
+   7) COMMAND EXECUTION
+   ========================= */
+
+void beginCommand(const Command &c){
+  curr = c; cmdActive = true; waiting = false; movingAxis = AX_NONE;
+
+  switch (c.type){
+    case CMD_MOVE:
+      if(c.axis==AX_X){ stepperX.move(c.value); movingAxis = AX_X; }
+      else            { stepperZ.move(c.value); movingAxis = AX_Z; }
+      enableDrivers(true);
+      break;
+
+    case CMD_SPEED: {
+      float sp = (float)c.value * 0.001f;
+      if(c.axis==AX_X){
+        speed_mm_s_X = sp;
+        stepperX.setMaxSpeed(STEPS_PER_MM_X * speed_mm_s_X);
+      }else{
+        speed_mm_s_Z = sp;
+        stepperZ.setMaxSpeed(STEPS_PER_MM_Z * speed_mm_s_Z);
+      }
+      cmdActive = false; // instantaneous
+    } break;
+
+    case CMD_WAIT:
+      waiting = true;
+      waitUntil = millis() + (unsigned long)c.value;
+      enableDrivers(false);
+      break;
+
+    default:
+      cmdActive = false;
+      break;
+  }
+}
+
+// Finished? (wrap-safe for wait)
+bool commandFinished(){
+  if(!cmdActive) return true;
+  if(waiting){
+    return (long)(millis() - waitUntil) >= 0;
+  }
+  if(curr.type==CMD_MOVE){
+    if(movingAxis==AX_X) return stepperX.distanceToGo()==0;
+    if(movingAxis==AX_Z) return stepperZ.distanceToGo()==0;
+  }
+  return true;
+}
+
+/* =========================
+   8) SETUP / LOOP
+   ========================= */
+
+void setup(){
+  pinMode(ENABLE_PIN, OUTPUT);
+  enableDrivers(false); // cool at boot
+
+  Serial.begin(115200);
+
+  stepperX.setMaxSpeed(STEPS_PER_MM_X * speed_mm_s_X);
+  stepperX.setAcceleration(STEPS_PER_MM_X * accel_mm_s2_X);
+  stepperX.setCurrentPosition(0);
+
+  stepperZ.setMaxSpeed(STEPS_PER_MM_Z * speed_mm_s_Z);
+  stepperZ.setAcceleration(STEPS_PER_MM_Z * accel_mm_s2_Z);
+  stepperZ.setCurrentPosition(0);
+
+  Serial.println(F("Ready. Commands: move x/z D | speed x/z S | wait T | stop (IMMEDIATE) | ! (panic)"));
+  Serial.println(F("Separate with ',', ';', or newline. 'stop' triggers even without separator."));
+}
+
+void loop(){
+  // --- stream input with immediate STOP detection ---
+  while (Serial.available()){
+    char c = (char)Serial.read();
+
+    // 1) single-byte panic
+    if (c == '!') {
+      emergencyStop(F("!"));
+      clauseLen = 0; // discard partial clause
+      continue;
+    }
+
+    // normal clause separation
+    if (c==',' || c==';' || c=='\n' || c=='\r'){
+      clauseBuf[clauseLen] = 0;
+      parseClause(clauseBuf);
+      clauseLen = 0;
+    } else {
+      if (clauseLen < sizeof(clauseBuf)-1) {
+        clauseBuf[clauseLen++] = c;
+        clauseBuf[clauseLen] = 0;
+
+        // 2) immediate "stop" without needing a separator
+        // trim + compare to "stop"
+        uint8_t i = 0; while (i < clauseLen && isspace((unsigned char)clauseBuf[i])) ++i;
+        int8_t j = (int8_t)clauseLen - 1; while (j >= 0 && isspace((unsigned char)clauseBuf[j])) --j;
+        if (j >= i) {
+          const char* word = "stop";
+          bool match = (j - i + 1 == 4);
+          for (uint8_t k=0; match && k<4; ++k)
+            match = (tolower((unsigned char)clauseBuf[i+k]) == (unsigned char)word[k]);
+          if (match) {
+            emergencyStop(F("STOP"));
+            clauseLen = 0;
+            continue;
+          }
+        }
+      } else {
+        // overflow: parse what we have
+        clauseBuf[clauseLen] = 0;
+        parseClause(clauseBuf);
+        clauseLen = 0;
+      }
+    }
+  }
+
+  // --- scheduler: one command at a time (no queued STOP path) ---
+  if (!cmdActive && !qEmpty()){
+    Command n; qDequeue(n);
+    beginCommand(n);
+  }
+
+  // service active motion only; keep cool otherwise
+  if (movingAxis==AX_X && driversEnabled) stepperX.run();
+  if (movingAxis==AX_Z && driversEnabled) stepperZ.run();
+
+  // complete command / power down after motion
+  if (cmdActive && commandFinished()){
+    if (curr.type==CMD_MOVE) enableDrivers(false);
+    cmdActive = false;
+    movingAxis = AX_NONE;
+  }
+
+  if (!cmdActive && qEmpty()){
+    enableDrivers(false); // fully idle
+  }
+}

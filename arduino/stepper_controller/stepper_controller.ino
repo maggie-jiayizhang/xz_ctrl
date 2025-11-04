@@ -27,7 +27,7 @@ struct OscilBlock {
   long rep;         // number of cycles; -1 means infinite
 };
 
-const int MAX_BLOCKS = 16;
+const int MAX_BLOCKS = 32;  // Increased from 16 (safe for Uno's 2KB SRAM)
 OscilBlock programBlocks[MAX_BLOCKS];
 int programLen = 0;
 bool programLoop = true;  // whether to loop the whole program

@@ -17,14 +17,13 @@ class ValidationError:
         return f"Line {self.line_num}: {self.message}"
 
 
-
-def validate_move_or_trap_command(parts: List[str], line_num: int, cmd_name: str) -> Optional[ValidationError]:
+def validate_move_command(parts: List[str], line_num: int) -> Optional[ValidationError]:
     """
-    Validate move/movetrap command: move x|z <distance> <speed> or movetrap x|z <distance> <speed>
+    Validate move command: move x|z <distance>
     Returns ValidationError if invalid, None if valid
     """
-    if len(parts) != 4:
-        return ValidationError(line_num, f"{cmd_name} requires 3 parameters (axis, distance, speed), got {len(parts)-1}")
+    if len(parts) != 3:
+        return ValidationError(line_num, f"move requires 2 parameters (axis, distance), got {len(parts)-1}")
     axis = parts[1].lower()
     if axis not in ['x', 'z']:
         return ValidationError(line_num, f"Invalid axis '{parts[1]}', must be 'x' or 'z'")
@@ -32,10 +31,23 @@ def validate_move_or_trap_command(parts: List[str], line_num: int, cmd_name: str
         distance = int(parts[2])
     except ValueError:
         return ValidationError(line_num, f"Invalid distance '{parts[2]}', must be an integer")
+    return None
+
+
+def validate_speed_command(parts: List[str], line_num: int) -> Optional[ValidationError]:
+    """
+    Validate speed command: speed x|z <speed>
+    Returns ValidationError if invalid, None if valid
+    """
+    if len(parts) != 3:
+        return ValidationError(line_num, f"speed requires 2 parameters (axis, speed), got {len(parts)-1}")
+    axis = parts[1].lower()
+    if axis not in ['x', 'z']:
+        return ValidationError(line_num, f"Invalid axis '{parts[1]}', must be 'x' or 'z'")
     try:
-        speed = int(parts[3])
+        speed = float(parts[2])
     except ValueError:
-        return ValidationError(line_num, f"Invalid speed '{parts[3]}', must be an integer")
+        return ValidationError(line_num, f"Invalid speed '{parts[2]}', must be a number")
     if speed <= 0:
         return ValidationError(line_num, f"Speed must be positive, got {speed}")
     return None
@@ -90,7 +102,6 @@ def validate_wait_command(parts: List[str], line_num: int) -> Optional[Validatio
     return None
 
 
-
 def validate_line(line: str, line_num: int) -> Optional[ValidationError]:
     """
     Validate a single line of script
@@ -106,9 +117,9 @@ def validate_line(line: str, line_num: int) -> Optional[ValidationError]:
     cmd = parts[0].lower()
     # Validate based on command type
     if cmd == 'move':
-        return validate_move_or_trap_command(parts, line_num, 'move')
-    elif cmd == 'movetrap':
-        return validate_move_or_trap_command(parts, line_num, 'movetrap')
+        return validate_move_command(parts, line_num)
+    elif cmd == 'speed':
+        return validate_speed_command(parts, line_num)
     elif cmd == 'loop':
         return validate_loop_command(parts, line_num)
     elif cmd == 'endloop':

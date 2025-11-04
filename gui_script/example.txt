@@ -1,0 +1,14 @@
+# Example script
+speed x 5.0
+speed z 5.0
+
+# move some distances
+move x 10
+wait 500
+move z -5
+
+loop 10
+  move x 10
+  wait 200
+  move x -10
+endloop
