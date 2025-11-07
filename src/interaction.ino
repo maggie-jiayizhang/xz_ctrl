@@ -67,6 +67,9 @@ float speed_mm_s_Z = 2.0f;
 const float accel_mm_s2_X = 5.0f;
 const float accel_mm_s2_Z = 5.0f;
 
+// Z soft-limit buffer: allow +Z up to this value (mm) beyond the zero baseline
+const float Z_SOFT_LIMIT_BUFFER_MM = 0.5f;
+
 // AccelStepper
 AccelStepper stepperX(AccelStepper::DRIVER, X_STEP_PIN, X_DIR_PIN);
 AccelStepper stepperZ(AccelStepper::DRIVER, Z_STEP_PIN, Z_DIR_PIN);
@@ -89,6 +92,8 @@ Command curr;
 bool  waiting=false;
 unsigned long waitUntil=0;
 uint8_t movingAxis=AX_NONE;
+// Soft-limit tracking for Z: prevent going below 0 after runtime zeroing
+long z_future_pos_steps = 0; // predicted Z position in steps (includes queued moves)
 
 /* =========================
    4) EMERGENCY STOP (IMMEDIATE)
@@ -108,6 +113,9 @@ void emergencyStop(const __FlashStringHelper* reason /*=nullptr*/) {
   stepperZ.setCurrentPosition(cz);
   stepperX.moveTo(cx);
   stepperZ.moveTo(cz);
+
+  // Keep predicted Z in sync with actual after stop
+  z_future_pos_steps = stepperZ.currentPosition();
 
   // Clear any pending commands/state
   qClear();
@@ -167,9 +175,9 @@ static bool parseFloat1000(const char *&p, long &out){
   return true;
 }
 
-inline long mm_to_steps(long mm, bool isX){
+inline long mm_to_steps(float mm, bool isX){
   float stepsPerMM = isX ? STEPS_PER_MM_X : STEPS_PER_MM_Z;
-  return (long)((float)mm * stepsPerMM);
+  return (long)(mm * stepsPerMM);
 }
 
 /* =========================
@@ -183,6 +191,23 @@ void parseClause(char *buf){
   const char *p = buf;
   skipSpaces(p);
   if(*p==0) return;
+
+  // zero z  (Set current Z as new 0 soft-limit baseline)
+  {
+    const char* t = p;
+    if (ieq(t, "zero")) {
+      skipSpaces(t);
+      if(*t==0){ Serial.println(F("[parse] zero axis?")); return; }
+      char ax = tolower((unsigned char)*t); ++t;
+      if(ax!='z'){ Serial.println(F("[parse] zero supports only 'z'")); return; }
+      // Safest: stop motion and clear queue, then zero Z
+      emergencyStop(F("ZERO"));
+      stepperZ.setCurrentPosition(0);
+      z_future_pos_steps = 0;
+      Serial.println(F("[info] Z zeroed at current position (soft-limit baseline set to 0)"));
+      return;
+    }
+  }
 
   // stop  (IMMEDIATE, do not enqueue)
   {
@@ -214,14 +239,28 @@ void parseClause(char *buf){
       if(*t==0){ Serial.println(F("[parse] move axis?")); return; }
       char ax = tolower((unsigned char)*t); ++t;
       if(ax!='x' && ax!='z'){ Serial.println(F("[parse] axis x/z?")); return; }
-      long D=0;
-      if(!parseNumber(t,D)){ Serial.println(F("[parse] move mm?")); return; }
-      long steps = mm_to_steps(D, ax=='x');
+      long D_scaled=0;  // Distance in mm * 1000 for 1 decimal place precision
+      if(!parseFloat1000(t,D_scaled)){ Serial.println(F("[parse] move mm?")); return; }
+      float D_mm = (float)D_scaled / 1000.0f;  // Convert back to mm as float
+      long steps = mm_to_steps(D_mm, ax=='x');
+      // Soft-limit guard for Z: with +Z = down, baseline 0 is the contact.
+      // We allow Z up to Z_SOFT_LIMIT_BUFFER_MM (e.g., 0.1mm) beyond 0 for small adjustments.
+      if(ax=='z'){
+        long predicted = z_future_pos_steps + steps;
+        float predicted_mm = (float)predicted / STEPS_PER_MM_Z;
+        if (predicted_mm > Z_SOFT_LIMIT_BUFFER_MM) {
+          Serial.print(F("[limit] Z move would exceed buffer ("));
+          Serial.print(Z_SOFT_LIMIT_BUFFER_MM);
+          Serial.println(F("mm); use 'zero z' at the contact point or reduce move."));
+          return;
+        }
+      }
       if(!enqueue(Command{CMD_MOVE, (uint8_t)(ax=='x'?AX_X:AX_Z), steps}))
         Serial.println(F("[queue] full (QUEUE_CAP=128). Increase QUEUE_CAP in firmware if needed."));
       else{
+        if(ax=='z'){ z_future_pos_steps += steps; }
         Serial.print(F("[queued] move ")); Serial.print((ax=='x')?'X':'Z');
-        Serial.print(F(" ")); Serial.print(D); Serial.print(F(" mm ("));
+        Serial.print(F(" ")); Serial.print(D_mm,1); Serial.print(F(" mm ("));
         Serial.print(steps); Serial.println(F(" steps)"));
       }
       return;
@@ -319,8 +358,9 @@ void setup(){
   stepperZ.setMaxSpeed(STEPS_PER_MM_Z * speed_mm_s_Z);
   stepperZ.setAcceleration(STEPS_PER_MM_Z * accel_mm_s2_Z);
   stepperZ.setCurrentPosition(0);
+  z_future_pos_steps = 0;
 
-  Serial.println(F("Ready. Commands: move x/z D | speed x/z S | wait T | stop (IMMEDIATE) | ! (panic)"));
+  Serial.println(F("Ready. Commands: move x/z D | speed x/z S | wait T | zero z | stop (IMMEDIATE) | ! (panic)"));
   Serial.println(F("Separate with ',', ';', or newline. 'stop' triggers even without separator."));
 }
 

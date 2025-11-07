@@ -20,6 +20,7 @@ class ValidationError:
 def validate_move_command(parts: List[str], line_num: int) -> Optional[ValidationError]:
     """
     Validate move command: move x|z <distance>
+    Distance must be a number with at most 1 decimal place (e.g., 1.5 ok, 1.55 not ok)
     Returns ValidationError if invalid, None if valid
     """
     if len(parts) != 3:
@@ -28,9 +29,15 @@ def validate_move_command(parts: List[str], line_num: int) -> Optional[Validatio
     if axis not in ['x', 'z']:
         return ValidationError(line_num, f"Invalid axis '{parts[1]}', must be 'x' or 'z'")
     try:
-        distance = int(parts[2])
+        distance = float(parts[2])
+        # Check for at most 1 decimal place
+        distance_str = parts[2].lstrip('-+')
+        if '.' in distance_str:
+            decimal_part = distance_str.split('.')[1]
+            if len(decimal_part) > 1:
+                return ValidationError(line_num, f"Distance '{parts[2]}' has too many decimal places (max 1 allowed, e.g., 1.5)")
     except ValueError:
-        return ValidationError(line_num, f"Invalid distance '{parts[2]}', must be an integer")
+        return ValidationError(line_num, f"Invalid distance '{parts[2]}', must be a number")
     return None
 
 
@@ -126,6 +133,13 @@ def validate_line(line: str, line_num: int) -> Optional[ValidationError]:
         return validate_endloop_command(parts, line_num)
     elif cmd == 'wait':
         return validate_wait_command(parts, line_num)
+    elif cmd == 'zero':
+        # zero z
+        if len(parts) != 2:
+            return ValidationError(line_num, f"zero requires 1 parameter (axis), got {len(parts)-1}")
+        if parts[1].lower() != 'z':
+            return ValidationError(line_num, "zero currently only supports axis 'z'")
+        return None
     else:
         return ValidationError(line_num, f"Unknown command '{cmd}'")
 
@@ -173,15 +187,68 @@ def validate_script(text: str) -> List[ValidationError]:
     errors = []
     lines = text.split('\n')
     
-    # Validate each line
+    # First pass: per-line validation
     for line_num, line in enumerate(lines, start=1):
-        error = validate_line(line, line_num)
-        if error:
-            errors.append(error)
+        err = validate_line(line, line_num)
+        if err:
+            errors.append(err)
     
     # Validate loop matching
     loop_errors = validate_loop_matching(lines)
     errors.extend(loop_errors)
+
+    # Second pass: simulate Z soft-limit (<=0.1 allowed, >0.1 forbidden) with zero z resetting baseline
+    z_pos = 0  # mm logical baseline; +Z is down; forbid z_pos > 0.1
+    Z_BUFFER = 0.1  # mm tolerance buffer to match firmware
+    stack: List[int] = []  # loop expansion counting (store repeat counts)
+    # We will expand loops naively up to a safety cap to detect negative excursions.
+    expanded: List[Tuple[int,str]] = []
+    i = 0
+    # Build a simple representation without full recursion complexity
+    # We'll just process linearly and handle loops via a stack collecting bodies.
+    loop_bodies: List[Tuple[int,List[Tuple[int,str]]]] = []  # (repeat, body)
+    for line_num, raw in enumerate(lines, start=1):
+        s = raw.strip()
+        if not s or s.startswith('#'): continue
+        parts = s.split()
+        cmd = parts[0].lower()
+        if cmd == 'loop' and len(parts)==2 and parts[1].isdigit():
+            loop_bodies.append((int(parts[1]), []))
+            continue
+        if cmd == 'endloop':
+            if not loop_bodies:
+                continue
+            rep, body = loop_bodies.pop()
+            body_rep = body * rep
+            if loop_bodies:
+                loop_bodies[-1][1].extend(body_rep)
+            else:
+                expanded.extend(body_rep)
+            continue
+        # normal command
+        if loop_bodies:
+            loop_bodies[-1][1].append((line_num, s))
+        else:
+            expanded.append((line_num, s))
+    # Unclosed loops ignored here; already reported
+
+    # Now check Z position evolution
+    for line_num, s in expanded:
+        parts = s.split()
+        cmd = parts[0].lower()
+        if cmd == 'zero' and len(parts)==2 and parts[1].lower()=='z':
+            z_pos = 0
+            continue
+        if cmd == 'move' and len(parts)==3 and parts[1].lower()=='z':
+            try:
+                delta = float(parts[2])
+            except ValueError:
+                continue  # already flagged in first pass
+            new_z = z_pos + delta
+            if new_z > Z_BUFFER:
+                errors.append(ValidationError(line_num, f"Z soft-limit violation: move would reach {new_z} (> {Z_BUFFER}). Use smaller move or zero z earlier."))
+            else:
+                z_pos = new_z
     
     # Sort errors by line number
     errors.sort(key=lambda e: e.line_num)

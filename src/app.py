@@ -116,6 +116,7 @@ class App(tk.Tk):
         self.text_area.tag_config("kw_loop", foreground="#f39c12", font=("Consolas", 12, "bold"))
         self.text_area.tag_config("kw_endloop", foreground="#f39c12", font=("Consolas", 12, "bold"))
         self.text_area.tag_config("kw_wait", foreground="#27ae60", font=("Consolas", 12, "bold"))
+        self.text_area.tag_config("kw_zero", foreground="#e74c3c", font=("Consolas", 12, "bold"))
         self.text_area.tag_config("comment", foreground="#95a5a6", font=("Consolas", 12, "italic"))
         self.text_area.tag_config("error", background="#ffcccc")
         self.text_area.bind("<KeyRelease>", self._highlight_syntax)
@@ -143,7 +144,7 @@ class App(tk.Tk):
     # =====================
     def _highlight_syntax(self, event=None):
         # Clear tags
-        for tag in ["kw_move", "kw_speed", "kw_loop", "kw_endloop", "kw_wait", "comment", "error"]:
+        for tag in ["kw_move", "kw_speed", "kw_loop", "kw_endloop", "kw_wait", "kw_zero", "comment", "error"]:
             self.text_area.tag_remove(tag, "1.0", tk.END)
 
         text = self.text_area.get("1.0", tk.END)
@@ -155,7 +156,7 @@ class App(tk.Tk):
             if s.startswith('#'):
                 self.text_area.tag_add("comment", f"{i}.0", f"{i}.end")
                 continue
-            for kw, tag in [(r"\bmove\b", "kw_move"), (r"\bspeed\b", "kw_speed"), (r"\bloop\b", "kw_loop"), (r"\bendloop\b", "kw_endloop"), (r"\bwait\b", "kw_wait")]:
+            for kw, tag in [(r"\bmove\b", "kw_move"), (r"\bspeed\b", "kw_speed"), (r"\bloop\b", "kw_loop"), (r"\bendloop\b", "kw_endloop"), (r"\bwait\b", "kw_wait"), (r"\bzero\b", "kw_zero")]:
                 m = re.search(kw, line, flags=re.IGNORECASE)
                 if m:
                     self.text_area.tag_add(tag, f"{i}.{m.start()}", f"{i}.{m.end()}")
@@ -286,6 +287,12 @@ class App(tk.Tk):
 
         # Convert: expand loops and pass through commands
         cmds = self.convert_to_arduino_commands(text.splitlines())
+        # Pre-check: Z soft-limit (>=0) with optional zero z resets in script
+        ok_soft, msg_soft = self._check_z_soft_limit(cmds)
+        if not ok_soft:
+            messagebox.showerror("Z Soft-limit", msg_soft)
+            self._set_status("Z soft-limit check failed")
+            return
         if not cmds:
             self._set_status("Nothing to send")
             return
@@ -309,7 +316,7 @@ class App(tk.Tk):
             # Allowed commands: move x/z D | speed x/z S | wait T
             parts = s.split()
             cmd = parts[0].lower()
-            if cmd in ("move", "speed", "wait"):
+            if cmd in ("move", "speed", "wait", "zero"):
                 target_list.append(s)
 
         for raw in lines:
@@ -342,6 +349,29 @@ class App(tk.Tk):
                 push_line(out, line)
 
         return out
+
+    def _check_z_soft_limit(self, cmds: List[str]):
+        """Simulate Z moves with 'zero z' baseline: +Z is down; forbid Z > 0.1.
+        Returns (ok, message)."""
+        z = 0  # mm baseline (0 = contact), +Z is down; allowed range <= 0.1
+        Z_BUFFER = 0.1  # mm tolerance to match firmware
+        for idx, s in enumerate(cmds, start=1):
+            parts = s.split()
+            if not parts:
+                continue
+            cmd = parts[0].lower()
+            if cmd == 'zero' and len(parts) == 2 and parts[1].lower() == 'z':
+                z = 0
+                continue
+            if cmd == 'move' and len(parts) == 3 and parts[1].lower() == 'z':
+                try:
+                    dz = float(parts[2])
+                except ValueError:
+                    continue
+                if z + dz > Z_BUFFER:
+                    return False, f"Command #{idx} would move Z beyond buffer (to {z+dz}, limit {Z_BUFFER}). Insert 'zero z' earlier or reduce the move."
+                z += dz
+        return True, "OK"
 
     # =====================
     # Emergency stop and console
