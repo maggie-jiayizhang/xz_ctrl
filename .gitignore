@@ -21,8 +21,3 @@ build/
 .DS_Store
 Thumbs.db
 
-# Project specific
-*.log
-test.csv
-example.txt
-test1.txt
