@@ -1,0 +1,14 @@
+# set zero of z
+zero z
+speed z 6
+
+move z -5
+# wait to start the capturing
+wait 2000
+
+loop 4
+move z 5
+move z -5
+endloop
+
+move z 5

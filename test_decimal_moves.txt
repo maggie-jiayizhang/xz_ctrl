@@ -1,0 +1,17 @@
+# Test script showing decimal move validation
+
+# VALID moves (1 decimal place max):
+move x 1.5
+move z -0.5
+move z 0.1
+move x -2.0
+move z 10.5
+
+# INVALID moves (too many decimal places):
+move x 1.55
+move z 0.123
+move x -2.555
+
+# Edge case - integers still work:
+move x 5
+move z -3
