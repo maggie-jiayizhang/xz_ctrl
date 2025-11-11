@@ -197,9 +197,9 @@ def validate_script(text: str) -> List[ValidationError]:
     loop_errors = validate_loop_matching(lines)
     errors.extend(loop_errors)
 
-    # Second pass: simulate Z soft-limit (<=0.1 allowed, >0.1 forbidden) with zero z resetting baseline
-    z_pos = 0  # mm logical baseline; +Z is down; forbid z_pos > 0.1
-    Z_BUFFER = 0.1  # mm tolerance buffer to match firmware
+    # Second pass: simulate Z soft-limit (<=2.0 allowed, >2.0 forbidden) with zero z resetting baseline
+    z_pos = 0  # mm logical baseline; +Z is down; forbid z_pos > 2.0
+    Z_BUFFER = 2  # mm tolerance buffer to match firmware
     stack: List[int] = []  # loop expansion counting (store repeat counts)
     # We will expand loops naively up to a safety cap to detect negative excursions.
     expanded: List[Tuple[int,str]] = []

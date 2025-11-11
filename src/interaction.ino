@@ -8,7 +8,7 @@
    ========================= */
 
 // ---- Command enums FIRST ----
-enum CmdType : uint8_t { CMD_NONE=0, CMD_MOVE, CMD_SPEED, CMD_WAIT, CMD_STOP };
+enum CmdType : uint8_t { CMD_NONE=0, CMD_MOVE, CMD_SPEED, CMD_ACCEL, CMD_WAIT, CMD_STOP };
 enum Axis    : uint8_t { AX_X=0, AX_Z=1, AX_NONE=2 };
 
 // value: steps (MOVE), speed*1000 (SPEED), ms (WAIT)
@@ -64,11 +64,12 @@ const float STEPS_PER_MM_Z = BASE_STEPS_PER_MM * MICROSTEP_Z;
 // Defaults (runtime changeable via serial)
 float speed_mm_s_X = 2.0f;
 float speed_mm_s_Z = 2.0f;
-const float accel_mm_s2_X = 5.0f;
-const float accel_mm_s2_Z = 5.0f;
+// Higher default acceleration for snappier motion; can be adjusted at runtime via 'accel x|z A'
+float accel_mm_s2_X = 20.0f;
+float accel_mm_s2_Z = 100.0f;
 
 // Z soft-limit buffer: allow +Z up to this value (mm) beyond the zero baseline
-const float Z_SOFT_LIMIT_BUFFER_MM = 0.5f;
+const float Z_SOFT_LIMIT_BUFFER_MM = 2.0f;
 
 // AccelStepper
 AccelStepper stepperX(AccelStepper::DRIVER, X_STEP_PIN, X_DIR_PIN);
@@ -200,11 +201,25 @@ void parseClause(char *buf){
       if(*t==0){ Serial.println(F("[parse] zero axis?")); return; }
       char ax = tolower((unsigned char)*t); ++t;
       if(ax!='z'){ Serial.println(F("[parse] zero supports only 'z'")); return; }
-      // Safest: stop motion and clear queue, then zero Z
-      emergencyStop(F("ZERO"));
-      stepperZ.setCurrentPosition(0);
-      z_future_pos_steps = 0;
-      Serial.println(F("[info] Z zeroed at current position (soft-limit baseline set to 0)"));
+      // Lightweight zero: do not emergency stop; just redefine baseline.
+      // Keep current queued moves; recompute predicted future Z from queue + current.
+      long actualSteps = stepperZ.currentPosition();
+      stepperZ.setCurrentPosition(0); // new logical baseline
+      // Recompute z_future_pos_steps from remaining queued Z moves plus any active motion distanceToGo.
+      long future = 0;
+      // Include active motion still to go if Z is moving
+      if (movingAxis == AX_Z) {
+        future += stepperZ.distanceToGo();
+      }
+      // Scan queue for pending Z moves
+      uint8_t idx = qHead;
+      while (idx != qTail) {
+        const Command &qc = q[idx];
+        if (qc.type == CMD_MOVE && qc.axis == AX_Z) future += qc.value;
+        idx = (uint8_t)(idx + 1) % QUEUE_CAP;
+      }
+      z_future_pos_steps = future;
+      Serial.println(F("[info] Z baseline reset (no stop). Soft-limit baseline set to 0."));
       return;
     }
   }
@@ -243,8 +258,8 @@ void parseClause(char *buf){
       if(!parseFloat1000(t,D_scaled)){ Serial.println(F("[parse] move mm?")); return; }
       float D_mm = (float)D_scaled / 1000.0f;  // Convert back to mm as float
       long steps = mm_to_steps(D_mm, ax=='x');
-      // Soft-limit guard for Z: with +Z = down, baseline 0 is the contact.
-      // We allow Z up to Z_SOFT_LIMIT_BUFFER_MM (e.g., 0.1mm) beyond 0 for small adjustments.
+  // Soft-limit guard for Z: with +Z = down, baseline 0 is the contact.
+  // We allow Z up to Z_SOFT_LIMIT_BUFFER_MM (e.g., 2.0mm) beyond 0 for small adjustments.
       if(ax=='z'){
         long predicted = z_future_pos_steps + steps;
         float predicted_mm = (float)predicted / STEPS_PER_MM_Z;

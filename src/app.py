@@ -13,7 +13,8 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Robot Controller")
-        self.geometry("1100x700")
+        # Default window: thinner and taller
+        self.geometry("900x900")
 
         # State
         self.arduino = ArduinoController()
@@ -351,10 +352,10 @@ class App(tk.Tk):
         return out
 
     def _check_z_soft_limit(self, cmds: List[str]):
-        """Simulate Z moves with 'zero z' baseline: +Z is down; forbid Z > 0.1.
+        """Simulate Z moves with 'zero z' baseline: +Z is down; forbid Z > 2.0.
         Returns (ok, message)."""
-        z = 0  # mm baseline (0 = contact), +Z is down; allowed range <= 0.1
-        Z_BUFFER = 0.1  # mm tolerance to match firmware
+        z = 0  # mm baseline (0 = contact), +Z is down; allowed range <= 2.0
+        Z_BUFFER = 2.0  # mm tolerance to match firmware
         for idx, s in enumerate(cmds, start=1):
             parts = s.split()
             if not parts:
