@@ -117,6 +117,7 @@ class App(tk.Tk):
         self.text_area.tag_config("kw_loop", foreground="#f39c12", font=("Consolas", 12, "bold"))
         self.text_area.tag_config("kw_endloop", foreground="#f39c12", font=("Consolas", 12, "bold"))
         self.text_area.tag_config("kw_wait", foreground="#27ae60", font=("Consolas", 12, "bold"))
+        self.text_area.tag_config("kw_pulse", foreground="#e91e63", font=("Consolas", 12, "bold"))
         self.text_area.tag_config("kw_zero", foreground="#e74c3c", font=("Consolas", 12, "bold"))
         self.text_area.tag_config("comment", foreground="#95a5a6", font=("Consolas", 12, "italic"))
         self.text_area.tag_config("error", background="#ffcccc")
@@ -145,7 +146,7 @@ class App(tk.Tk):
     # =====================
     def _highlight_syntax(self, event=None):
         # Clear tags
-        for tag in ["kw_move", "kw_speed", "kw_loop", "kw_endloop", "kw_wait", "kw_zero", "comment", "error"]:
+        for tag in ["kw_move", "kw_speed", "kw_loop", "kw_endloop", "kw_wait", "kw_pulse", "kw_zero", "comment", "error"]:
             self.text_area.tag_remove(tag, "1.0", tk.END)
 
         text = self.text_area.get("1.0", tk.END)
@@ -157,7 +158,7 @@ class App(tk.Tk):
             if s.startswith('#'):
                 self.text_area.tag_add("comment", f"{i}.0", f"{i}.end")
                 continue
-            for kw, tag in [(r"\bmove\b", "kw_move"), (r"\bspeed\b", "kw_speed"), (r"\bloop\b", "kw_loop"), (r"\bendloop\b", "kw_endloop"), (r"\bwait\b", "kw_wait"), (r"\bzero\b", "kw_zero")]:
+            for kw, tag in [(r"\bmove\b", "kw_move"), (r"\bspeed\b", "kw_speed"), (r"\bloop\b", "kw_loop"), (r"\bendloop\b", "kw_endloop"), (r"\bwait\b", "kw_wait"), (r"\bpulse\b", "kw_pulse"), (r"\bzero\b", "kw_zero")]:
                 m = re.search(kw, line, flags=re.IGNORECASE)
                 if m:
                     self.text_area.tag_add(tag, f"{i}.{m.start()}", f"{i}.{m.end()}")
@@ -314,10 +315,10 @@ class App(tk.Tk):
             s = line.strip()
             if not s or s.startswith('#'):
                 return
-            # Allowed commands: move x/z D | speed x/z S | wait T
+            # Allowed commands: move x/z D | speed x/z S | wait T | pulse T | zero z
             parts = s.split()
             cmd = parts[0].lower()
-            if cmd in ("move", "speed", "wait", "zero"):
+            if cmd in ("move", "speed", "wait", "pulse", "zero"):
                 target_list.append(s)
 
         for raw in lines:

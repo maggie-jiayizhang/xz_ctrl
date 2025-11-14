@@ -8,10 +8,10 @@
    ========================= */
 
 // ---- Command enums FIRST ----
-enum CmdType : uint8_t { CMD_NONE=0, CMD_MOVE, CMD_SPEED, CMD_ACCEL, CMD_WAIT, CMD_STOP };
+enum CmdType : uint8_t { CMD_NONE=0, CMD_MOVE, CMD_SPEED, CMD_ACCEL, CMD_WAIT, CMD_PULSE, CMD_STOP };
 enum Axis    : uint8_t { AX_X=0, AX_Z=1, AX_NONE=2 };
 
-// value: steps (MOVE), speed*1000 (SPEED), ms (WAIT)
+// value: steps (MOVE), speed*1000 (SPEED), accel*1000 (ACCEL), ms (WAIT/PULSE)
 struct Command {
   uint8_t type;  // CmdType
   uint8_t axis;  // Axis
@@ -51,6 +51,7 @@ bool qDequeue(Command &c){
 #define Z_STEP_PIN 4
 #define Z_DIR_PIN  7
 #define ENABLE_PIN 8   // shared enable (LOW = on)
+#define MAGNET_PIN 12  // electromagnet pulse output
 
 // Mechanics / Microstepping
 #define MICROSTEP_X 32
@@ -70,6 +71,9 @@ float accel_mm_s2_Z = 100.0f;
 
 // Z soft-limit buffer: allow +Z up to this value (mm) beyond the zero baseline
 const float Z_SOFT_LIMIT_BUFFER_MM = 2.0f;
+
+// Electromagnet pulse timing
+const unsigned long PULSE_BREAK_MS = 50;  // Break time between consecutive pulses (ms)
 
 // AccelStepper
 AccelStepper stepperX(AccelStepper::DRIVER, X_STEP_PIN, X_DIR_PIN);
@@ -95,6 +99,11 @@ unsigned long waitUntil=0;
 uint8_t movingAxis=AX_NONE;
 // Soft-limit tracking for Z: prevent going below 0 after runtime zeroing
 long z_future_pos_steps = 0; // predicted Z position in steps (includes queued moves)
+// Electromagnet pulse state
+bool pulsing=false;
+unsigned long pulseEndTime=0;
+bool inBreak=false;
+unsigned long breakEndTime=0;
 
 /* =========================
    4) EMERGENCY STOP (IMMEDIATE)
@@ -123,6 +132,9 @@ void emergencyStop(const __FlashStringHelper* reason /*=nullptr*/) {
   cmdActive   = false;
   waiting     = false;
   movingAxis  = AX_NONE;
+  pulsing     = false;
+  inBreak     = false;
+  digitalWrite(MAGNET_PIN, LOW);  // ensure magnet is off
 
   // Power down to keep cool
   enableDrivers(false);
@@ -246,6 +258,23 @@ void parseClause(char *buf){
     }
   }
 
+  // pulse T  (electromagnet pulse)
+  {
+    const char* t=p;
+    if(ieq(t,"pulse")){
+      long T=0;
+      if(!parseNumber(t,T)){ Serial.println(F("[parse] pulse T?")); return; }
+      if(T<0) T=0;
+      if(T>5000){
+        Serial.println(F("[warning] pulse duration capped at 5000ms for safety"));
+        T=5000;
+      }
+      enqueue(Command{CMD_PULSE, AX_NONE, (int32_t)T});
+      Serial.print(F("[queued] pulse ")); Serial.print((unsigned long)T); Serial.println(F(" ms"));
+      return;
+    }
+  }
+
   // move x/z D
   {
     const char* t=p;
@@ -337,6 +366,17 @@ void beginCommand(const Command &c){
       enableDrivers(false);
       break;
 
+    case CMD_PULSE:
+      // Start pulse immediately (scheduler guarantees !pulsing && !inBreak)
+      digitalWrite(MAGNET_PIN, HIGH);
+      pulseEndTime = millis() + (unsigned long)c.value;
+      pulsing = true;
+      Serial.print(F("[pulse] START - "));
+      Serial.print((unsigned long)c.value);
+      Serial.println(F(" ms"));
+      cmdActive = false;  // pulse runs in background
+      break;
+
     default:
       cmdActive = false;
       break;
@@ -364,6 +404,9 @@ void setup(){
   pinMode(ENABLE_PIN, OUTPUT);
   enableDrivers(false); // cool at boot
 
+  pinMode(MAGNET_PIN, OUTPUT);
+  digitalWrite(MAGNET_PIN, LOW);  // ensure magnet is off at boot
+
   Serial.begin(115200);
 
   stepperX.setMaxSpeed(STEPS_PER_MM_X * speed_mm_s_X);
@@ -375,7 +418,7 @@ void setup(){
   stepperZ.setCurrentPosition(0);
   z_future_pos_steps = 0;
 
-  Serial.println(F("Ready. Commands: move x/z D | speed x/z S | wait T | zero z | stop (IMMEDIATE) | ! (panic)"));
+  Serial.println(F("Ready. Commands: move x/z D | speed x/z S | wait T | pulse T | zero z | stop (IMMEDIATE) | ! (panic)"));
   Serial.println(F("Separate with ',', ';', or newline. 'stop' triggers even without separator."));
 }
 
@@ -426,7 +469,9 @@ void loop(){
   }
 
   // --- scheduler: one command at a time (no queued STOP path) ---
-  if (!cmdActive && !qEmpty()){
+  // Do not dequeue new commands while a pulse is active or during enforced break,
+  // so that queued CMD_PULSE commands execute strictly one-by-one with spacing.
+  if (!cmdActive && !qEmpty() && !pulsing && !inBreak){
     Command n; qDequeue(n);
     beginCommand(n);
   }
@@ -434,6 +479,32 @@ void loop(){
   // service active motion only; keep cool otherwise
   if (movingAxis==AX_X && driversEnabled) stepperX.run();
   if (movingAxis==AX_Z && driversEnabled) stepperZ.run();
+
+  // --- electromagnet pulse state machine ---
+  if (pulsing) {
+    // Check if pulse is complete (wrap-safe)
+    if ((long)(millis() - pulseEndTime) >= 0) {
+      digitalWrite(MAGNET_PIN, LOW);
+      pulsing = false;
+      Serial.println(F("[pulse] END"));
+      
+      // Start break period if more commands are queued
+      if (!qEmpty()) {
+        inBreak = true;
+        breakEndTime = millis() + PULSE_BREAK_MS;
+        Serial.print(F("[break] "));
+        Serial.print(PULSE_BREAK_MS);
+        Serial.println(F(" ms"));
+      }
+    }
+  }
+
+  if (inBreak) {
+    // Check if break is complete (wrap-safe)
+    if ((long)(millis() - breakEndTime) >= 0) {
+      inBreak = false;
+    }
+  }
 
   // complete command / power down after motion
   if (cmdActive && commandFinished()){

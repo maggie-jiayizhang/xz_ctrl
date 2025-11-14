@@ -1,0 +1,23 @@
+# Example script
+speed x 5.0
+speed z 5.0
+move x 10
+wait 500
+move z -5
+
+loop 3
+pulse 100
+endloop
+
+
+pulse 100
+
+pulse 400
+
+pulse 100
+
+wait 1000
+
+loop 3
+pulse 100
+endloop

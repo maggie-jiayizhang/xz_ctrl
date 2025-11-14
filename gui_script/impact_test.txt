@@ -1,0 +1,16 @@
+zero z 
+
+speed z 10
+
+move z -10
+move z 11
+
+# delay to get started
+wait 2000 
+
+loop 5
+move z -10
+move z 10
+endloop
+
+move z -1

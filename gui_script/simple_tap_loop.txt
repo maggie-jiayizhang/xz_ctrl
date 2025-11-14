@@ -1,0 +1,8 @@
+# simple tap loop
+# calibrate z (by hand) before running
+
+loop 15
+pulse 100
+wait 100
+# effective wait = 50 + 100
+endloop

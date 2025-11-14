@@ -90,6 +90,28 @@ def validate_endloop_command(parts: List[str], line_num: int) -> Optional[Valida
     return None
 
 
+def validate_pulse_command(parts: List[str], line_num: int) -> Optional[ValidationError]:
+    """
+    Validate pulse command: pulse milliseconds
+    Returns ValidationError if invalid, None if valid
+    """
+    if len(parts) != 2:
+        return ValidationError(line_num, f"pulse requires 1 parameter (milliseconds), got {len(parts)-1}")
+    
+    try:
+        milliseconds = int(parts[1])
+    except ValueError:
+        return ValidationError(line_num, f"Invalid milliseconds '{parts[1]}', must be an integer")
+    
+    if milliseconds < 0:
+        return ValidationError(line_num, f"Pulse time cannot be negative, got {milliseconds}")
+    
+    if milliseconds > 5000:
+        return ValidationError(line_num, f"Pulse time too long (max 5000ms), got {milliseconds}")
+    
+    return None
+
+
 def validate_wait_command(parts: List[str], line_num: int) -> Optional[ValidationError]:
     """
     Validate wait command: wait milliseconds
@@ -133,6 +155,8 @@ def validate_line(line: str, line_num: int) -> Optional[ValidationError]:
         return validate_endloop_command(parts, line_num)
     elif cmd == 'wait':
         return validate_wait_command(parts, line_num)
+    elif cmd == 'pulse':
+        return validate_pulse_command(parts, line_num)
     elif cmd == 'zero':
         # zero z
         if len(parts) != 2:
