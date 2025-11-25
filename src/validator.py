@@ -221,58 +221,9 @@ def validate_script(text: str) -> List[ValidationError]:
     loop_errors = validate_loop_matching(lines)
     errors.extend(loop_errors)
 
-    # Second pass: simulate Z soft-limit (<=2.0 allowed, >2.0 forbidden) with zero z resetting baseline
-    z_pos = 0  # mm logical baseline; +Z is down; forbid z_pos > 2.0
-    Z_BUFFER = 2  # mm tolerance buffer to match firmware
-    stack: List[int] = []  # loop expansion counting (store repeat counts)
-    # We will expand loops naively up to a safety cap to detect negative excursions.
-    expanded: List[Tuple[int,str]] = []
-    i = 0
-    # Build a simple representation without full recursion complexity
-    # We'll just process linearly and handle loops via a stack collecting bodies.
-    loop_bodies: List[Tuple[int,List[Tuple[int,str]]]] = []  # (repeat, body)
-    for line_num, raw in enumerate(lines, start=1):
-        s = raw.strip()
-        if not s or s.startswith('#'): continue
-        parts = s.split()
-        cmd = parts[0].lower()
-        if cmd == 'loop' and len(parts)==2 and parts[1].isdigit():
-            loop_bodies.append((int(parts[1]), []))
-            continue
-        if cmd == 'endloop':
-            if not loop_bodies:
-                continue
-            rep, body = loop_bodies.pop()
-            body_rep = body * rep
-            if loop_bodies:
-                loop_bodies[-1][1].extend(body_rep)
-            else:
-                expanded.extend(body_rep)
-            continue
-        # normal command
-        if loop_bodies:
-            loop_bodies[-1][1].append((line_num, s))
-        else:
-            expanded.append((line_num, s))
-    # Unclosed loops ignored here; already reported
-
-    # Now check Z position evolution
-    for line_num, s in expanded:
-        parts = s.split()
-        cmd = parts[0].lower()
-        if cmd == 'zero' and len(parts)==2 and parts[1].lower()=='z':
-            z_pos = 0
-            continue
-        if cmd == 'move' and len(parts)==3 and parts[1].lower()=='z':
-            try:
-                delta = float(parts[2])
-            except ValueError:
-                continue  # already flagged in first pass
-            new_z = z_pos + delta
-            if new_z > Z_BUFFER:
-                errors.append(ValidationError(line_num, f"Z soft-limit violation: move would reach {new_z} (> {Z_BUFFER}). Use smaller move or zero z earlier."))
-            else:
-                z_pos = new_z
+    # Note: Z soft-limit checking is now handled by the GUI's _check_z_soft_limit()
+    # which maintains stateful position tracking across script runs.
+    # The validator only checks syntax, not runtime position constraints.
     
     # Sort errors by line number
     errors.sort(key=lambda e: e.line_num)

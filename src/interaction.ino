@@ -245,6 +245,23 @@ void parseClause(char *buf){
     }
   }
 
+  // report z  (Instant status of current & predicted Z position)
+  {
+    const char* t = p;
+    if (ieq(t, "report")) {
+      skipSpaces(t);
+      if (*t==0){ Serial.println(F("[parse] report axis?")); return; }
+      char ax = tolower((unsigned char)*t); ++t;
+      if (ax!='z'){ Serial.println(F("[parse] report supports only 'z'")); return; }
+      long curSteps = stepperZ.currentPosition();
+      float curMM = (float)curSteps / STEPS_PER_MM_Z;
+      float futureMM = (float)z_future_pos_steps / STEPS_PER_MM_Z;
+      Serial.print(F("[z] current ")); Serial.print(curMM,2); Serial.print(F(" mm (")); Serial.print(curSteps); Serial.print(F(" steps), future "));
+      Serial.print(futureMM,2); Serial.print(F(" mm (")); Serial.print(z_future_pos_steps); Serial.println(F(" steps)"));
+      return;
+    }
+  }
+
   // wait T
   {
     const char* t=p;
@@ -416,9 +433,14 @@ void setup(){
   stepperZ.setMaxSpeed(STEPS_PER_MM_Z * speed_mm_s_Z);
   stepperZ.setAcceleration(STEPS_PER_MM_Z * accel_mm_s2_Z);
   stepperZ.setCurrentPosition(0);
-  z_future_pos_steps = 0;
+  // Start Z tracking at -50mm (safe distance from contact point)
+  // User will move closer and use 'zero z' to set actual contact baseline
+  // Establish a logical starting offset of -50mm (above the contact baseline) so early downward (+Z) moves are allowed.
+  // We align both the physical currentPosition and our predictive accumulator so 'report z' is intuitive at startup.
+  stepperZ.setCurrentPosition(mm_to_steps(-50.0f, false));
+  z_future_pos_steps = stepperZ.currentPosition();
 
-  Serial.println(F("Ready. Commands: move x/z D | speed x/z S | wait T | pulse T | zero z | stop (IMMEDIATE) | ! (panic)"));
+  Serial.println(F("Ready. Commands: move x/z D | speed x/z S | wait T | pulse T | zero z | report z | stop (IMMEDIATE) | ! (panic)"));
   Serial.println(F("Separate with ',', ';', or newline. 'stop' triggers even without separator."));
 }
 

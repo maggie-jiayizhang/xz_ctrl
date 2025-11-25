@@ -6,7 +6,7 @@ import platform
 from typing import List
 
 from validator import validate_script, get_error_summary
-from serial_comm import ArduinoController
+from arduino_serial import ArduinoController
 
 
 class App(tk.Tk):
@@ -19,6 +19,10 @@ class App(tk.Tk):
         # State
         self.arduino = ArduinoController()
         self.arduino.set_response_callback(self.on_arduino_response)
+        
+        # Z position tracking: starts at -50mm (safe distance from contact)
+        # Updated by script simulation; persists across runs until 'zero z' resets it
+        self.z_position = -50.0  # mm
         
         # Detect OS for modifier key
         self.is_mac = platform.system() == 'Darwin'
@@ -51,6 +55,10 @@ class App(tk.Tk):
         self.stop_btn = ttk.Button(toolbar, text="STOP", command=self.emergency_stop)
         self.stop_btn.pack(side=tk.LEFT, padx=4, pady=4)
         self.stop_btn_text = "STOP"
+
+        self.reportz_btn = ttk.Button(toolbar, text="Report Z", command=self.report_z)
+        self.reportz_btn.pack(side=tk.LEFT, padx=4, pady=4)
+        self.reportz_btn_text = "Report Z"
 
         ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4)
 
@@ -119,6 +127,7 @@ class App(tk.Tk):
         self.text_area.tag_config("kw_wait", foreground="#27ae60", font=("Consolas", 12, "bold"))
         self.text_area.tag_config("kw_pulse", foreground="#e91e63", font=("Consolas", 12, "bold"))
         self.text_area.tag_config("kw_zero", foreground="#e74c3c", font=("Consolas", 12, "bold"))
+        self.text_area.tag_config("kw_report", foreground="#16a085", font=("Consolas", 12, "bold"))
         self.text_area.tag_config("comment", foreground="#95a5a6", font=("Consolas", 12, "italic"))
         self.text_area.tag_config("error", background="#ffcccc")
         self.text_area.bind("<KeyRelease>", self._highlight_syntax)
@@ -146,7 +155,7 @@ class App(tk.Tk):
     # =====================
     def _highlight_syntax(self, event=None):
         # Clear tags
-        for tag in ["kw_move", "kw_speed", "kw_loop", "kw_endloop", "kw_wait", "kw_pulse", "kw_zero", "comment", "error"]:
+        for tag in ["kw_move", "kw_speed", "kw_loop", "kw_endloop", "kw_wait", "kw_pulse", "kw_zero", "kw_report", "comment", "error"]:
             self.text_area.tag_remove(tag, "1.0", tk.END)
 
         text = self.text_area.get("1.0", tk.END)
@@ -158,7 +167,7 @@ class App(tk.Tk):
             if s.startswith('#'):
                 self.text_area.tag_add("comment", f"{i}.0", f"{i}.end")
                 continue
-            for kw, tag in [(r"\bmove\b", "kw_move"), (r"\bspeed\b", "kw_speed"), (r"\bloop\b", "kw_loop"), (r"\bendloop\b", "kw_endloop"), (r"\bwait\b", "kw_wait"), (r"\bpulse\b", "kw_pulse"), (r"\bzero\b", "kw_zero")]:
+            for kw, tag in [(r"\bmove\b", "kw_move"), (r"\bspeed\b", "kw_speed"), (r"\bloop\b", "kw_loop"), (r"\bendloop\b", "kw_endloop"), (r"\bwait\b", "kw_wait"), (r"\bpulse\b", "kw_pulse"), (r"\bzero\b", "kw_zero"), (r"\breport\b", "kw_report")]:
                 m = re.search(kw, line, flags=re.IGNORECASE)
                 if m:
                     self.text_area.tag_add(tag, f"{i}.{m.start()}", f"{i}.{m.end()}")
@@ -318,7 +327,7 @@ class App(tk.Tk):
             # Allowed commands: move x/z D | speed x/z S | wait T | pulse T | zero z
             parts = s.split()
             cmd = parts[0].lower()
-            if cmd in ("move", "speed", "wait", "pulse", "zero"):
+            if cmd in ("move", "speed", "wait", "pulse", "zero", "report"):
                 target_list.append(s)
 
         for raw in lines:
@@ -354,16 +363,24 @@ class App(tk.Tk):
 
     def _check_z_soft_limit(self, cmds: List[str]):
         """Simulate Z moves with 'zero z' baseline: +Z is down; forbid Z > 2.0.
+        Tracks Z position persistently across script runs.
         Returns (ok, message)."""
-        z = 0  # mm baseline (0 = contact), +Z is down; allowed range <= 2.0
+        z = self.z_position  # Start from last known position (persistent across runs)
         Z_BUFFER = 2.0  # mm tolerance to match firmware
+        
+        # Track if this script will zero Z (for position update at end)
+        will_zero = False
+        z_after_last_zero = 0  # Position after the last 'zero z' in script
+        
         for idx, s in enumerate(cmds, start=1):
             parts = s.split()
             if not parts:
                 continue
             cmd = parts[0].lower()
             if cmd == 'zero' and len(parts) == 2 and parts[1].lower() == 'z':
-                z = 0
+                z = 0  # Reset baseline to contact point for simulation
+                will_zero = True
+                z_after_last_zero = 0  # Track position from this zero point
                 continue
             if cmd == 'move' and len(parts) == 3 and parts[1].lower() == 'z':
                 try:
@@ -371,8 +388,20 @@ class App(tk.Tk):
                 except ValueError:
                     continue
                 if z + dz > Z_BUFFER:
-                    return False, f"Command #{idx} would move Z beyond buffer (to {z+dz}, limit {Z_BUFFER}). Insert 'zero z' earlier or reduce the move."
+                    print(z, dz)
+                    return False, f"Command #{idx} would move Z beyond buffer (to {z+dz:.1f}, limit {Z_BUFFER}). Use 'zero z' at contact point or reduce the move."
                 z += dz
+                if will_zero:
+                    z_after_last_zero = z  # Update position relative to last zero
+        
+        # Only update GUI tracking if script doesn't contain 'zero z'
+        # If script has 'zero z', the Arduino will handle the actual zeroing
+        if not will_zero:
+            self.z_position = z
+        # If script has 'zero z', update to position after last zero
+        else:
+            self.z_position = z_after_last_zero
+            
         return True, "OK"
 
     # =====================
@@ -411,6 +440,7 @@ class App(tk.Tk):
         self.bind(f'<{self.mod_key}-s>', lambda e: self.save_script())
         self.bind(f'<{self.mod_key}-o>', lambda e: self.load_script())
         self.bind(f'<{self.mod_key}-l>', lambda e: self.clear_console())
+        self.bind(f'<{self.mod_key}-z>', lambda e: self.report_z())
         
         # Show shortcuts when modifier is held
         self.bind(f'<{self.mod_key}_L>', self._show_shortcuts)
@@ -429,6 +459,7 @@ class App(tk.Tk):
         self.save_btn.config(text=f"{self.save_btn_text} [S]")
         self.load_btn.config(text=f"{self.load_btn_text} [O]")
         self.clear_console_btn.config(text=f"{self.clear_console_btn_text} [L]")
+        self.reportz_btn.config(text=f"{self.reportz_btn_text} [Z]")
 
     def _hide_shortcuts(self, event=None):
         """Hide keyboard shortcuts from buttons."""
@@ -441,6 +472,19 @@ class App(tk.Tk):
         self.save_btn.config(text=self.save_btn_text)
         self.load_btn.config(text=self.load_btn_text)
         self.clear_console_btn.config(text=self.clear_console_btn_text)
+        self.reportz_btn.config(text=self.reportz_btn_text)
+
+    def report_z(self):
+        """Request current Z position from firmware (report z)."""
+        if not self.arduino.is_connected:
+            messagebox.showwarning("Arduino", "Not connected")
+            return
+        ok, msg = self.arduino.send_command("report z")
+        if not ok:
+            self._log_console(f"[error] {msg}\n")
+        else:
+            # Firmware will respond asynchronously; we just set status
+            self._set_status("Requested Z position")
 
     def _on_closing(self):
         """Send stop signal to Arduino before closing if connected."""
