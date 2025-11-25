@@ -43,39 +43,41 @@ class App(tk.Tk):
 
     def _build_ui(self):
         # Top toolbar
+        padx, pady = 1.5, 2
+
         toolbar = ttk.Frame(self, style='Tool.TFrame')
         toolbar.pack(side=tk.TOP, fill=tk.X)
 
         self.connect_btn = ttk.Button(toolbar, text="Connect", command=self.connect_arduino, style='Toolbar.TButton')
-        self.connect_btn.pack(side=tk.LEFT, padx=4, pady=4)
+        self.connect_btn.pack(side=tk.LEFT, padx=padx, pady=pady)
         self.connect_btn_text = "Connect"
 
         self.send_btn = ttk.Button(toolbar, text="Send to Arduino", command=self.send_to_arduino, style='Toolbar.TButton')
-        self.send_btn.pack(side=tk.LEFT, padx=4, pady=4)
+        self.send_btn.pack(side=tk.LEFT, padx=padx, pady=pady)
         self.send_btn_text = "Send to Arduino"
 
         self.stop_btn = ttk.Button(toolbar, text="STOP", command=self.emergency_stop, style='Danger.TButton')
-        self.stop_btn.pack(side=tk.LEFT, padx=4, pady=4)
+        self.stop_btn.pack(side=tk.LEFT, padx=padx, pady=pady)
         self.stop_btn_text = "STOP"
 
         self.reportz_btn = ttk.Button(toolbar, text="Report Z", command=self.report_z, style='Toolbar.TButton')
-        self.reportz_btn.pack(side=tk.LEFT, padx=4, pady=4)
+        self.reportz_btn.pack(side=tk.LEFT, padx=padx, pady=pady)
         self.reportz_btn_text = "Report Z"
 
-        ttk.Separator(toolbar, orient=tk.VERTICAL, style='Thin.TSeparator').pack(side=tk.LEFT, fill=tk.Y, padx=4)
+        ttk.Separator(toolbar, orient=tk.VERTICAL, style='Thin.TSeparator').pack(side=tk.LEFT, fill=tk.Y, padx=padx)
 
         self.save_btn = ttk.Button(toolbar, text="Save Script", command=self.save_script, style='Toolbar.TButton')
-        self.save_btn.pack(side=tk.LEFT, padx=4, pady=4)
+        self.save_btn.pack(side=tk.LEFT, padx=padx, pady=pady)
         self.save_btn_text = "Save Script"
 
         self.load_btn = ttk.Button(toolbar, text="Load Script", command=self.load_script, style='Toolbar.TButton')
-        self.load_btn.pack(side=tk.LEFT, padx=4, pady=4)
+        self.load_btn.pack(side=tk.LEFT, padx=padx, pady=pady)
         self.load_btn_text = "Load Script"
 
-        ttk.Separator(toolbar, orient=tk.VERTICAL, style='Thin.TSeparator').pack(side=tk.LEFT, fill=tk.Y, padx=4)
+        ttk.Separator(toolbar, orient=tk.VERTICAL, style='Thin.TSeparator').pack(side=tk.LEFT, fill=tk.Y, padx=padx)
 
         self.clear_console_btn = ttk.Button(toolbar, text="Clear Console", command=self.clear_console, style='Toolbar.TButton')
-        self.clear_console_btn.pack(side=tk.LEFT, padx=4, pady=4)
+        self.clear_console_btn.pack(side=tk.LEFT, padx=padx, pady=pady)
         self.clear_console_btn_text = "Clear Console"
 
         # Paned window: editor left, console right
@@ -109,6 +111,8 @@ class App(tk.Tk):
             highlightthickness=0,
         )
         self.line_numbers.pack(side=tk.LEFT, fill=tk.Y)
+        # Match the spacing and padding of the text area
+        self.line_numbers.configure(pady=8, spacing1=2, spacing3=4)
 
         # Editor Text
         self.text_area = ScrolledText(
@@ -123,6 +127,9 @@ class App(tk.Tk):
         self.text_area.configure(relief='flat', border=0, highlightthickness=0)
         self.text_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.text_area.configure(padx=10, pady=8, spacing1=2, spacing3=4)
+        
+        # Synchronize line numbers scrolling with text area
+        self.text_area.configure(yscrollcommand=self._on_text_scroll)
 
         # Sample starter text
         starter = (
@@ -203,11 +210,11 @@ class App(tk.Tk):
         # Generic toolbar button
         style.configure(
             'Toolbar.TButton',
-            font=('Segoe UI', 10),
+            font=('Segoe UI', 12),
             padding=(10, 6),
             background='#f8f9fa',
             borderwidth=0,
-            relief='flat',
+            relief='groove',
             foreground='#222222'
         )
         style.map(
@@ -219,12 +226,12 @@ class App(tk.Tk):
         # Emphasis / danger button
         style.configure(
             'Danger.TButton',
-            font=('Segoe UI', 10, 'bold'),
-            padding=(12, 6),
+            font=('Segoe UI', 12, 'bold'),
+            padding=(10, 6),
             foreground='#ffffff',
             background='#e74c3c',
             borderwidth=0,
-            relief='flat'
+            relief='groove'
         )
         style.map(
             'Danger.TButton',
@@ -232,7 +239,7 @@ class App(tk.Tk):
         )
 
         # Headings & status
-        style.configure('Heading.TLabel', font=('Segoe UI', 11, 'bold'), foreground='#343a40', background='#f0f2f5')
+        style.configure('Heading.TLabel', font=('Segoe UI', 11, 'bold'), foreground='#343a40')
         style.configure('Status.TLabel', font=('Segoe UI', 9), foreground='#495057', background='#e9ecef', padding=4)
 
         # Separator
@@ -275,6 +282,21 @@ class App(tk.Tk):
         self.line_numbers.delete('1.0', tk.END)
         self.line_numbers.insert('1.0', line_numbers_string)
         self.line_numbers.config(state='disabled')
+        
+        # Sync scroll position after updating
+        self._sync_line_number_scroll()
+    
+    def _on_text_scroll(self, *args):
+        """Handle text area scrolling and sync line numbers."""
+        # Update the scrollbar
+        self.text_area.vbar.set(*args)
+        # Sync line numbers to match scroll position
+        self._sync_line_number_scroll()
+    
+    def _sync_line_number_scroll(self):
+        """Synchronize line numbers scroll position with text area."""
+        # Get the current view of the text area
+        self.line_numbers.yview_moveto(self.text_area.yview()[0])
 
     # =====================
     # File operations
