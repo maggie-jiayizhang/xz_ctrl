@@ -162,6 +162,7 @@ class App(tk.Tk):
         self.text_area.bind("<KeyRelease>", self._highlight_syntax)
         self.text_area.bind("<KeyRelease>", self._update_line_numbers, add="+")
         self.text_area.bind("<<Modified>>", self._update_line_numbers, add="+")
+        self.text_area.bind("<Return>", self._handle_return)
         self._highlight_syntax()
         self._update_line_numbers()
 
@@ -297,6 +298,38 @@ class App(tk.Tk):
         """Synchronize line numbers scroll position with text area."""
         # Get the current view of the text area
         self.line_numbers.yview_moveto(self.text_area.yview()[0])
+    
+    def _handle_return(self, event=None):
+        """Handle Return key press to provide auto-indentation after loop commands."""
+        # Get the current line
+        current_pos = self.text_area.index(tk.INSERT)
+        line_num = int(current_pos.split('.')[0])
+        
+        # Get the previous line content (the line we just finished)
+        prev_line = self.text_area.get(f"{line_num}.0", f"{line_num}.end").strip()
+        
+        # Check if the previous line is a loop command
+        if prev_line.startswith("loop "):
+            # Insert newline and add indentation (2 spaces)
+            self.text_area.insert(tk.INSERT, "\n  ")
+            return "break"  # Prevent default newline behavior
+        
+        # Check if current line is indented (inside a loop)
+        current_line_full = self.text_area.get(f"{line_num}.0", f"{line_num}.end")
+        indent_match = len(current_line_full) - len(current_line_full.lstrip())
+        
+        if indent_match > 0:
+            # Preserve indentation unless it's an endloop
+            if prev_line == "endloop":
+                # Remove indentation for next line after endloop
+                return None  # Allow default newline
+            else:
+                # Maintain current indentation level
+                indent = " " * indent_match
+                self.text_area.insert(tk.INSERT, f"\n{indent}")
+                return "break"
+        
+        return None  # Allow default newline behavior
 
     # =====================
     # File operations
