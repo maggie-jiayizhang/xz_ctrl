@@ -310,22 +310,30 @@ class App(tk.Tk):
         
         # Check if the previous line is a loop command
         if prev_line.startswith("loop "):
-            # Insert newline and add indentation (2 spaces)
-            self.text_area.insert(tk.INSERT, "\n  ")
+            # Insert newline and add indentation (3 spaces)
+            self.text_area.insert(tk.INSERT, "\n   ")
             return "break"  # Prevent default newline behavior
         
         # Check if current line is indented (inside a loop)
         current_line_full = self.text_area.get(f"{line_num}.0", f"{line_num}.end")
-        indent_match = len(current_line_full) - len(current_line_full.lstrip())
+        # Count leading whitespace length
+        leading_ws_len = len(current_line_full) - len(current_line_full.lstrip())
+        leading_ws = current_line_full[:leading_ws_len]
         
-        if indent_match > 0:
+        if leading_ws_len > 0:
             # Preserve indentation unless it's an endloop
             if prev_line == "endloop":
                 # Remove indentation for next line after endloop
                 return None  # Allow default newline
             else:
-                # Maintain current indentation level
-                indent = " " * indent_match
+                # Normalize indentation to multiples of 4 spaces
+                # If the line starts with tabs, convert them to spaces (4 per tab)
+                spaces_equiv = leading_ws.replace("\t", "    ")
+                # If mixed, keep effective width the same
+                indent_width = len(spaces_equiv)
+                # Snap to nearest lower multiple of 4
+                normalized_width = max(0, (indent_width // 4) * 4)
+                indent = " " * normalized_width
                 self.text_area.insert(tk.INSERT, f"\n{indent}")
                 return "break"
         
