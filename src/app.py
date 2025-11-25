@@ -29,6 +29,8 @@ class App(tk.Tk):
         self.mod_key = 'Command' if self.is_mac else 'Control'
         self.mod_symbol = '⌘' if self.is_mac else 'Ctrl'
         self.showing_shortcuts = False
+        # Apply minimal modern styling before building UI
+        self._apply_modern_theme()
 
         # Build UI
         self._build_ui()
@@ -41,38 +43,38 @@ class App(tk.Tk):
 
     def _build_ui(self):
         # Top toolbar
-        toolbar = ttk.Frame(self)
+        toolbar = ttk.Frame(self, style='Tool.TFrame')
         toolbar.pack(side=tk.TOP, fill=tk.X)
 
-        self.connect_btn = ttk.Button(toolbar, text="Connect", command=self.connect_arduino)
+        self.connect_btn = ttk.Button(toolbar, text="Connect", command=self.connect_arduino, style='Toolbar.TButton')
         self.connect_btn.pack(side=tk.LEFT, padx=4, pady=4)
         self.connect_btn_text = "Connect"
 
-        self.send_btn = ttk.Button(toolbar, text="Send to Arduino", command=self.send_to_arduino)
+        self.send_btn = ttk.Button(toolbar, text="Send to Arduino", command=self.send_to_arduino, style='Toolbar.TButton')
         self.send_btn.pack(side=tk.LEFT, padx=4, pady=4)
         self.send_btn_text = "Send to Arduino"
 
-        self.stop_btn = ttk.Button(toolbar, text="STOP", command=self.emergency_stop)
+        self.stop_btn = ttk.Button(toolbar, text="STOP", command=self.emergency_stop, style='Danger.TButton')
         self.stop_btn.pack(side=tk.LEFT, padx=4, pady=4)
         self.stop_btn_text = "STOP"
 
-        self.reportz_btn = ttk.Button(toolbar, text="Report Z", command=self.report_z)
+        self.reportz_btn = ttk.Button(toolbar, text="Report Z", command=self.report_z, style='Toolbar.TButton')
         self.reportz_btn.pack(side=tk.LEFT, padx=4, pady=4)
         self.reportz_btn_text = "Report Z"
 
-        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4)
+        ttk.Separator(toolbar, orient=tk.VERTICAL, style='Thin.TSeparator').pack(side=tk.LEFT, fill=tk.Y, padx=4)
 
-        self.save_btn = ttk.Button(toolbar, text="Save Script", command=self.save_script)
+        self.save_btn = ttk.Button(toolbar, text="Save Script", command=self.save_script, style='Toolbar.TButton')
         self.save_btn.pack(side=tk.LEFT, padx=4, pady=4)
         self.save_btn_text = "Save Script"
 
-        self.load_btn = ttk.Button(toolbar, text="Load Script", command=self.load_script)
+        self.load_btn = ttk.Button(toolbar, text="Load Script", command=self.load_script, style='Toolbar.TButton')
         self.load_btn.pack(side=tk.LEFT, padx=4, pady=4)
         self.load_btn_text = "Load Script"
 
-        ttk.Separator(toolbar, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=4)
+        ttk.Separator(toolbar, orient=tk.VERTICAL, style='Thin.TSeparator').pack(side=tk.LEFT, fill=tk.Y, padx=4)
 
-        self.clear_console_btn = ttk.Button(toolbar, text="Clear Console", command=self.clear_console)
+        self.clear_console_btn = ttk.Button(toolbar, text="Clear Console", command=self.clear_console, style='Toolbar.TButton')
         self.clear_console_btn.pack(side=tk.LEFT, padx=4, pady=4)
         self.clear_console_btn_text = "Clear Console"
 
@@ -85,22 +87,42 @@ class App(tk.Tk):
         paned.add(editor_frame, weight=3)
 
         # Editor label and help
-        lbl = ttk.Label(editor_frame, text="Script Editor (Arduino format + loop/endloop)")
+        lbl = ttk.Label(editor_frame, text="Script Editor", style='Heading.TLabel')
         lbl.pack(anchor=tk.W, padx=6, pady=(6, 2))
 
         # Editor with line numbers
         editor_container = ttk.Frame(editor_frame)
         editor_container.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
 
-        # Line numbers
-        self.line_numbers = tk.Text(editor_container, width=4, padx=3, takefocus=0, 
-                                      border=0, background='#f0f0f0', state='disabled',
-                                      font=("Consolas", 12), wrap=tk.NONE)
+        # Line numbers (slightly toned background for subtle separation)
+        self.line_numbers = tk.Text(
+            editor_container,
+            width=4,
+            padx=4,
+            takefocus=0,
+            border=0,
+            background='#f7f7f7',
+            state='disabled',
+            font=("Consolas", 12),
+            wrap=tk.NONE,
+            relief='flat',
+            highlightthickness=0,
+        )
         self.line_numbers.pack(side=tk.LEFT, fill=tk.Y)
 
         # Editor Text
-        self.text_area = ScrolledText(editor_container, wrap=tk.NONE, font=("Consolas", 12), undo=True)
+        self.text_area = ScrolledText(
+            editor_container,
+            wrap=tk.NONE,
+            font=("Consolas", 12),
+            undo=True,
+            background='#ffffff',  # higher contrast for readability
+            foreground='#1e1e1e',
+            insertbackground='#1e1e1e',
+        )
+        self.text_area.configure(relief='flat', border=0, highlightthickness=0)
         self.text_area.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.text_area.configure(padx=10, pady=8, spacing1=2, spacing3=4)
 
         # Sample starter text
         starter = (
@@ -139,16 +161,88 @@ class App(tk.Tk):
         # Console frame
         console_frame = ttk.Frame(paned)
         paned.add(console_frame, weight=2)
-        ttk.Label(console_frame, text="Arduino Console").pack(anchor=tk.W, padx=6, pady=(6, 2))
-        self.console = ScrolledText(console_frame, wrap=tk.WORD, height=10, state=tk.NORMAL, font=("Consolas", 10))
+        ttk.Label(console_frame, text="Arduino Console", style='Heading.TLabel').pack(anchor=tk.W, padx=6, pady=(6, 2))
+        self.console = ScrolledText(
+            console_frame,
+            wrap=tk.WORD,
+            height=10,
+            state=tk.NORMAL,
+            font=("Consolas", 10),
+            background='#fafafa',  # slightly off-white so main editor draws focus
+            foreground='#222222',
+            insertbackground='#222222',
+        )
+        self.console.configure(relief='flat', border=0, highlightthickness=0)
         self.console.pack(fill=tk.BOTH, expand=True, padx=6, pady=6)
+        self.console.configure(padx=8, pady=6, spacing1=1, spacing3=3)
         self.console.insert(tk.END, "<console output will appear here>\n")
         self.console.configure(state=tk.DISABLED)
 
         # Status bar
         self.status_var = tk.StringVar(value="Disconnected")
-        status = ttk.Label(self, textvariable=self.status_var, anchor=tk.W, relief=tk.SUNKEN)
+        status = ttk.Label(self, textvariable=self.status_var, anchor=tk.W, style='Status.TLabel')
         status.pack(side=tk.BOTTOM, fill=tk.X)
+
+    def _apply_modern_theme(self):
+        """Define a minimal modern ttk styling set without external dependencies."""
+        style = ttk.Style(self)
+        # Use a stable theme; fall back silently
+        for candidate in ('clam', 'alt', 'default'):
+            try:
+                style.theme_use(candidate)
+                break
+            except Exception:
+                continue
+
+        # Base window background
+        self.configure(background='#f0f2f5')
+
+        # Toolbar frame
+        style.configure('Tool.TFrame', background='#f8f9fa')
+
+        # Generic toolbar button
+        style.configure(
+            'Toolbar.TButton',
+            font=('Segoe UI', 10),
+            padding=(10, 6),
+            background='#f8f9fa',
+            borderwidth=0,
+            relief='flat',
+            foreground='#222222'
+        )
+        style.map(
+            'Toolbar.TButton',
+            background=[('active', '#e9ecef'), ('pressed', '#dee2e6'), ('!disabled', '#f8f9fa')],
+            foreground=[('disabled', '#999999')]
+        )
+
+        # Emphasis / danger button
+        style.configure(
+            'Danger.TButton',
+            font=('Segoe UI', 10, 'bold'),
+            padding=(12, 6),
+            foreground='#ffffff',
+            background='#e74c3c',
+            borderwidth=0,
+            relief='flat'
+        )
+        style.map(
+            'Danger.TButton',
+            background=[('active', '#d9534f'), ('pressed', '#c9453c'), ('!disabled', '#e74c3c')]
+        )
+
+        # Headings & status
+        style.configure('Heading.TLabel', font=('Segoe UI', 11, 'bold'), foreground='#343a40', background='#f0f2f5')
+        style.configure('Status.TLabel', font=('Segoe UI', 9), foreground='#495057', background='#e9ecef', padding=4)
+
+        # Separator
+        style.configure('Thin.TSeparator', background='#d0d7de')
+
+        # Optional notebook tweak (ignore failures)
+        try:
+            style.configure('TNotebook', background='#f0f2f5')
+        except Exception:
+            pass
 
     # =====================
     # Syntax highlighting
