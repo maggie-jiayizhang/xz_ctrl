@@ -434,13 +434,27 @@ class App(tk.Tk):
     def _bind_shortcuts(self):
         """Bind keyboard shortcuts and show/hide hints."""
         # Bind shortcuts
-        self.bind(f'<{self.mod_key}-c>', lambda e: self.connect_arduino())
+        # Connect moved off 'C' so Copy can use the standard binding.
+        self.bind(f'<{self.mod_key}-k>', lambda e: self.connect_arduino())  # Connect
         self.bind(f'<{self.mod_key}-r>', lambda e: self.send_to_arduino())
         self.bind(f'<{self.mod_key}-e>', lambda e: self.emergency_stop())
         self.bind(f'<{self.mod_key}-s>', lambda e: self.save_script())
         self.bind(f'<{self.mod_key}-o>', lambda e: self.load_script())
         self.bind(f'<{self.mod_key}-l>', lambda e: self.clear_console())
         self.bind(f'<{self.mod_key}-z>', lambda e: self.report_z())
+
+        # Editor common shortcuts (Select All, Copy, Paste) bound explicitly for both Control and Command
+        for key in ('Control', 'Command'):
+            # Select All
+            self.text_area.bind(f'<{key}-a>', self._select_all)
+            # Copy / Paste (use Tk virtual events so system clipboard works)
+            self.text_area.bind(f'<{key}-c>', self._copy)
+            self.text_area.bind(f'<{key}-v>', self._paste)
+        # Also bind on root in case focus shifts
+        for key in ('Control', 'Command'):
+            self.bind(f'<{key}-a>', self._select_all)
+            self.bind(f'<{key}-c>', self._copy)
+            self.bind(f'<{key}-v>', self._paste)
         
         # Show shortcuts when modifier is held
         self.bind(f'<{self.mod_key}_L>', self._show_shortcuts)
@@ -453,7 +467,7 @@ class App(tk.Tk):
         if self.showing_shortcuts:
             return
         self.showing_shortcuts = True
-        self.connect_btn.config(text=f"{self.connect_btn_text} [C]")
+        self.connect_btn.config(text=f"{self.connect_btn_text} [K]")
         self.send_btn.config(text=f"{self.send_btn_text} [R]")
         self.stop_btn.config(text=f"{self.stop_btn_text} [E]")
         self.save_btn.config(text=f"{self.save_btn_text} [S]")
@@ -473,6 +487,22 @@ class App(tk.Tk):
         self.load_btn.config(text=self.load_btn_text)
         self.clear_console_btn.config(text=self.clear_console_btn_text)
         self.reportz_btn.config(text=self.reportz_btn_text)
+
+    # =====================
+    # Editor convenience actions
+    # =====================
+    def _select_all(self, event=None):
+        self.text_area.tag_add('sel', '1.0', 'end-1c')
+        return 'break'
+
+    def _copy(self, event=None):
+        # Use virtual event so Tk handles clipboard
+        self.text_area.event_generate('<<Copy>>')
+        return 'break'
+
+    def _paste(self, event=None):
+        self.text_area.event_generate('<<Paste>>')
+        return 'break'
 
     def report_z(self):
         """Request current Z position from firmware (report z)."""
