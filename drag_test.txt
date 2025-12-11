@@ -1,0 +1,12 @@
+zero z
+# reset
+move z -4
+
+wait 5000
+
+move z 4
+wait 3000
+
+# move x -
+speed x 3
+move x -20
