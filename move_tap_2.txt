@@ -1,0 +1,10 @@
+wait 2000
+loop 5
+    move x -0.1
+    loop 5
+       move z 1
+       move z -1
+       wait 1000
+    endloop
+    wait 2000
+endloop

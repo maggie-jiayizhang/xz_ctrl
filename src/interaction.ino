@@ -190,7 +190,10 @@ static bool parseFloat1000(const char *&p, long &out){
 
 inline long mm_to_steps(float mm, bool isX){
   float stepsPerMM = isX ? STEPS_PER_MM_X : STEPS_PER_MM_Z;
-  return (long)(mm * stepsPerMM);
+  float v = mm * stepsPerMM;
+  // Round to nearest integer step, handling negative values correctly
+  if (v >= 0.0f) return (long)(v + 0.5f);
+  else            return (long)(v - 0.5f);
 }
 
 /* =========================

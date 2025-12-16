@@ -1,0 +1,8 @@
+speed z 5
+loop 10
+    move z -3
+    move z 3
+    wait 1000
+endloop
+
+move z -3

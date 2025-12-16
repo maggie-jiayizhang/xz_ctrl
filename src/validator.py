@@ -20,7 +20,7 @@ class ValidationError:
 def validate_move_command(parts: List[str], line_num: int) -> Optional[ValidationError]:
     """
     Validate move command: move x|z <distance>
-    Distance must be a number with at most 1 decimal place (e.g., 1.5 ok, 1.55 not ok)
+    Distance must be a number with at most 2 decimal places (e.g., 1.5 or 1.23 ok, 1.234 not ok)
     Returns ValidationError if invalid, None if valid
     """
     if len(parts) != 3:
@@ -30,12 +30,12 @@ def validate_move_command(parts: List[str], line_num: int) -> Optional[Validatio
         return ValidationError(line_num, f"Invalid axis '{parts[1]}', must be 'x' or 'z'")
     try:
         distance = float(parts[2])
-        # Check for at most 1 decimal place
+        # Check for at most 2 decimal places
         distance_str = parts[2].lstrip('-+')
         if '.' in distance_str:
             decimal_part = distance_str.split('.')[1]
-            if len(decimal_part) > 1:
-                return ValidationError(line_num, f"Distance '{parts[2]}' has too many decimal places (max 1 allowed, e.g., 1.5)")
+            if len(decimal_part) > 2:
+                return ValidationError(line_num, f"Distance '{parts[2]}' has too many decimal places (max 2 allowed, e.g., 1.23)")
     except ValueError:
         return ValidationError(line_num, f"Invalid distance '{parts[2]}', must be a number")
     return None
