@@ -498,6 +498,8 @@ void loop(){
   // so that queued CMD_PULSE commands execute strictly one-by-one with spacing.
   if (!cmdActive && !qEmpty() && !pulsing && !inBreak){
     Command n; qDequeue(n);
+    // Notify host that we dequeued one command (a slot freed in the queue)
+    Serial.println(F("[dequeued]"));
     beginCommand(n);
   }
 

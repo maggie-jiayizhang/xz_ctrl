@@ -1,14 +1,13 @@
 wait 2000
     
-loop 3
+loop 5
 speed z 0.5
 move z -0.7
 
 speed z 4
 move z 1
-wait 1000
 speed z 0.5
 move z -0.3
 
-wait 1000
+wait 500
 endloop

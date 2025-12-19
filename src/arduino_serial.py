@@ -18,6 +18,11 @@ class ArduinoController:
         self.read_thread = None
         self.running = False
         self.response_callback = None
+        # Flow-control counters and sync objects
+        self._queue_lock = threading.Lock()
+        self._queued_reports = 0
+        self._dequeued_reports = 0
+        self._queue_cond = threading.Condition(self._queue_lock)
         
     def list_ports(self):
         """Return a list of available serial ports"""
@@ -105,26 +110,33 @@ class ArduinoController:
         if not self.is_connected:
             return False, "Not connected"
         
-        # Convert to list if string
+        # Sliding-window stream: send up to `window` outstanding commands
         if isinstance(script_lines, str):
-            script_lines = [line.strip() for line in script_lines.split('\n') if line.strip()]
-        
+            raw_lines = [ln for ln in (l.strip() for l in script_lines.split('\n'))]
+        else:
+            raw_lines = [ln for ln in (l.strip() for l in script_lines)]
+        lines = [ln for ln in raw_lines if ln and not ln.startswith('#')]
+
+        window = 32  # number of outstanding commands to allow (safe for UNO)
+        total = len(lines)
+        idx = 0
         try:
-            for line in script_lines:
-                line = line.strip()
-                if not line or line.startswith('#'):
-                    continue
-                
-                # Send command
-                success, msg = self.send_command(line)
-                if not success:
-                    return False, msg
-                
-                # Small delay between commands to avoid overwhelming the Arduino
-                time.sleep(0.01)
-            
-            return True, f"Sent {len(script_lines)} commands"
-            
+            while idx < total:
+                with self._queue_cond:
+                    outstanding = self._queued_reports - self._dequeued_reports
+                    if outstanding < window:
+                        line = lines[idx]
+                        success, msg = self.send_command(line)
+                        if not success:
+                            return False, msg
+                        idx += 1
+                        # give the firmware a moment to echo its queued message
+                        self._queue_cond.wait(timeout=0.005)
+                    else:
+                        # wait until dequeues reduce outstanding
+                        self._queue_cond.wait(timeout=1.0)
+
+            return True, f"Sent {total} commands"
         except Exception as e:
             return False, f"Script send failed: {str(e)}"
     
@@ -150,8 +162,19 @@ class ArduinoController:
             try:
                 if self.ser and self.ser.in_waiting > 0:
                     line = self.ser.readline().decode('utf-8', errors='ignore').strip()
-                    if line and self.response_callback:
-                        self.response_callback(line)
+                    if line:
+                        # Track queue occupancy messages for flow control
+                        if line.startswith('[queued]'):
+                            with self._queue_cond:
+                                self._queued_reports += 1
+                                self._queue_cond.notify_all()
+                        elif line.startswith('[dequeued]'):
+                            with self._queue_cond:
+                                self._dequeued_reports += 1
+                                self._queue_cond.notify_all()
+
+                        if self.response_callback:
+                            self.response_callback(line)
             except Exception as e:
                 if self.running:  # Only report errors if we're supposed to be running
                     if self.response_callback:
