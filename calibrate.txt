@@ -1,0 +1,14 @@
+wait 2000
+    
+loop 3
+speed z 0.5
+move z -0.7
+
+speed z 4
+move z 1
+
+speed z 0.5
+move z -0.3
+
+wait 2000
+endloop

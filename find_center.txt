@@ -1,0 +1,11 @@
+# for finding center of the sensor
+zero z
+move z -0.95
+
+wait 2000
+
+
+loop 10
+    loop 5
+        move z 1
+        move z -1
