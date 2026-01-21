@@ -1,0 +1,6 @@
+speed x 2
+speed z 2
+
+move z -2
+move x -1.2
+move z 2

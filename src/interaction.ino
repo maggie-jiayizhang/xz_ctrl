@@ -19,7 +19,7 @@ struct Command {
 };
 
 // ---- Queue storage & funcs NEXT ----
-#define QUEUE_CAP 128                      // increased to 128 for long scripts
+#define QUEUE_CAP 200                      // increased to 256 for long scripts
 static Command q[QUEUE_CAP];
 static uint8_t qHead=0, qTail=0;
 
@@ -171,8 +171,8 @@ static bool parseNumber(const char *&p, long &out){
   return true;
 }
 
-// float to fixed-point (*1000)
-static bool parseFloat1000(const char *&p, long &out){
+// float to fixed-point (*10000) for 2 decimal places (0.01mm accuracy)
+static bool parseFloat10000(const char *&p, long &out){
   skipSpaces(p);
   bool neg=false; if(*p=='+'||*p=='-'){ neg=(*p=='-'); ++p; }
   if(!(isdigit((unsigned char)*p) || *p=='.')) return false;
@@ -180,20 +180,17 @@ static bool parseFloat1000(const char *&p, long &out){
   while(isdigit((unsigned char)*p)){ intPart=intPart*10+(*p-'0'); ++p; }
   if(*p=='.'){
     ++p;
-    while(isdigit((unsigned char)*p) && fracPow<1000){ fracPart=fracPart*10+(*p-'0'); fracPow*=10; ++p; }
+    while(isdigit((unsigned char)*p) && fracPow<10000){ fracPart=fracPart*10+(*p-'0'); fracPow*=10; ++p; }
     while(isdigit((unsigned char)*p)) ++p; // skip extra decimals
   }
-  long scaled = intPart*1000 + (fracPow>1 ? (fracPart*(1000/fracPow)) : 0);
+  long scaled = intPart*10000 + (fracPow>1 ? (fracPart*(10000/fracPow)) : 0);
   out = neg ? -scaled : scaled;
   return true;
 }
 
 inline long mm_to_steps(float mm, bool isX){
   float stepsPerMM = isX ? STEPS_PER_MM_X : STEPS_PER_MM_Z;
-  float v = mm * stepsPerMM;
-  // Round to nearest integer step, handling negative values correctly
-  if (v >= 0.0f) return (long)(v + 0.5f);
-  else            return (long)(v - 0.5f);
+  return (long)(mm * stepsPerMM);
 }
 
 /* =========================
@@ -303,9 +300,9 @@ void parseClause(char *buf){
       if(*t==0){ Serial.println(F("[parse] move axis?")); return; }
       char ax = tolower((unsigned char)*t); ++t;
       if(ax!='x' && ax!='z'){ Serial.println(F("[parse] axis x/z?")); return; }
-      long D_scaled=0;  // Distance in mm * 1000 for 1 decimal place precision
-      if(!parseFloat1000(t,D_scaled)){ Serial.println(F("[parse] move mm?")); return; }
-      float D_mm = (float)D_scaled / 1000.0f;  // Convert back to mm as float
+      long D_scaled=0;  // Distance in mm * 10000 for 2 decimal place precision
+      if(!parseFloat10000(t,D_scaled)){ Serial.println(F("[parse] move mm?")); return; }
+      float D_mm = (float)D_scaled / 10000.0f;  // Convert back to mm as float
       long steps = mm_to_steps(D_mm, ax=='x');
   // Soft-limit guard for Z: with +Z = down, baseline 0 is the contact.
   // We allow Z up to Z_SOFT_LIMIT_BUFFER_MM (e.g., 2.0mm) beyond 0 for small adjustments.
@@ -324,7 +321,7 @@ void parseClause(char *buf){
       else{
         if(ax=='z'){ z_future_pos_steps += steps; }
         Serial.print(F("[queued] move ")); Serial.print((ax=='x')?'X':'Z');
-        Serial.print(F(" ")); Serial.print(D_mm,1); Serial.print(F(" mm ("));
+        Serial.print(F(" ")); Serial.print(D_mm,2); Serial.print(F(" mm ("));
         Serial.print(steps); Serial.println(F(" steps)"));
       }
       return;
@@ -338,14 +335,16 @@ void parseClause(char *buf){
       skipSpaces(t);
       if(*t==0){ Serial.println(F("[parse] speed axis?")); return; }
       char ax = tolower((unsigned char)*t); ++t;
-      long S1000=0;
-      if(!parseFloat1000(t,S1000)){ Serial.println(F("[parse] speed mm/s?")); return; }
-      if(!enqueue(Command{CMD_SPEED, (uint8_t)(ax=='x'?AX_X:AX_Z), (int32_t)S1000}))
+      long S10000=0;
+      if(!parseFloat10000(t,S10000)){ Serial.println(F("[parse] speed mm/s?")); return; }
+      if(!enqueue(Command{CMD_SPEED, (uint8_t)(ax=='x'?AX_X:AX_Z), (int32_t)S10000}))
         Serial.println(F("[queue] full (QUEUE_CAP=128). Increase QUEUE_CAP in firmware if needed."));
       else{
         Serial.print(F("[queued] speed ")); Serial.print((ax=='x')?'X':'Z');
-        Serial.print(F(" ")); Serial.print(S1000/1000); Serial.print('.');
-        Serial.println((int)(abs(S1000)%1000));
+        Serial.print(F(" ")); Serial.print(S10000/10000); Serial.print('.');
+        int frac = (int)(abs(S10000)%10000);
+        if(frac<1000) Serial.print('0'); if(frac<100) Serial.print('0'); if(frac<10) Serial.print('0');
+        Serial.println(frac);
       }
       return;
     }
@@ -369,7 +368,7 @@ void beginCommand(const Command &c){
       break;
 
     case CMD_SPEED: {
-      float sp = (float)c.value * 0.001f;
+      float sp = (float)c.value * 0.0001f;
       if(c.axis==AX_X){
         speed_mm_s_X = sp;
         stepperX.setMaxSpeed(STEPS_PER_MM_X * speed_mm_s_X);
@@ -498,8 +497,6 @@ void loop(){
   // so that queued CMD_PULSE commands execute strictly one-by-one with spacing.
   if (!cmdActive && !qEmpty() && !pulsing && !inBreak){
     Command n; qDequeue(n);
-    // Notify host that we dequeued one command (a slot freed in the queue)
-    Serial.println(F("[dequeued]"));
     beginCommand(n);
   }
 

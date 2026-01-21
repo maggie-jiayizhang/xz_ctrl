@@ -4,6 +4,8 @@ speed z 4
 loop 25
 move z -0.75
 move z 1
+# wait for load cell
+wait 100
 move z -0.25
 
 wait 500

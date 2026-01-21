@@ -305,43 +305,39 @@ class App(tk.Tk):
         current_pos = self.text_area.index(tk.INSERT)
         line_num = int(current_pos.split('.')[0])
         
-        # Helper to get a line's content (no trailing newline)
-        def _line(i):
-            return self.text_area.get(f"{i}.0", f"{i}.end")
-
-        # Find previous non-empty line (could be the current line if it's non-empty)
-        prev_idx = line_num
-        prev_line = _line(prev_idx).strip()
-        while prev_idx > 1 and prev_line == "":
-            prev_idx -= 1
-            prev_line = _line(prev_idx).strip()
-
-        # If the closest previous non-empty line is a loop start, indent
+        # Get the previous line content (the line we just finished)
+        prev_line = self.text_area.get(f"{line_num}.0", f"{line_num}.end").strip()
+        
+        # Check if the previous line is a loop command
         if prev_line.startswith("loop "):
-            self.text_area.insert(tk.INSERT, "\n    ")
-            return "break"
-
-        # If the line we are on has leading whitespace, preserve its indentation
-        current_line_full = _line(line_num)
+            # Insert newline and add indentation (3 spaces)
+            self.text_area.insert(tk.INSERT, "\n   ")
+            return "break"  # Prevent default newline behavior
+        
+        # Check if current line is indented (inside a loop)
+        current_line_full = self.text_area.get(f"{line_num}.0", f"{line_num}.end")
+        # Count leading whitespace length
         leading_ws_len = len(current_line_full) - len(current_line_full.lstrip())
         leading_ws = current_line_full[:leading_ws_len]
-
-        # If previous non-empty line was 'endloop', don't keep indent
-        if prev_line == "endloop":
-            return None
-
+        
         if leading_ws_len > 0:
-            # Convert tabs to 4 spaces to compute effective indent, then produce that many spaces
-            spaces_equiv = leading_ws.replace("\t", "    ")
-            indent_width = len(spaces_equiv)
-            # Snap to nearest lower multiple of 4 for consistency
-            normalized_width = max(0, (indent_width // 4) * 4)
-            indent = " " * normalized_width if normalized_width > 0 else spaces_equiv
-            self.text_area.insert(tk.INSERT, f"\n{indent}")
-            return "break"
-
-        # Default: allow normal newline
-        return None
+            # Preserve indentation unless it's an endloop
+            if prev_line == "endloop":
+                # Remove indentation for next line after endloop
+                return None  # Allow default newline
+            else:
+                # Normalize indentation to multiples of 4 spaces
+                # If the line starts with tabs, convert them to spaces (4 per tab)
+                spaces_equiv = leading_ws.replace("\t", "    ")
+                # If mixed, keep effective width the same
+                indent_width = len(spaces_equiv)
+                # Snap to nearest lower multiple of 4
+                normalized_width = max(0, (indent_width // 4) * 4)
+                indent = " " * normalized_width
+                self.text_area.insert(tk.INSERT, f"\n{indent}")
+                return "break"
+        
+        return None  # Allow default newline behavior
 
     # =====================
     # File operations
