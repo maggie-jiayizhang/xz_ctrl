@@ -1,0 +1,36 @@
+wait 2000
+speed z 5 
+
+loop 3 
+move z -0.85
+move z 1
+# wait for load cell
+wait 200
+move z -0.15
+
+wait 1000
+
+move z -2
+move x 0.2
+move z 2
+wait 1000
+endloop
+
+loop 3 
+move z -0.68
+move z 1
+# wait for load cell
+wait 200
+move z -0.32
+
+wait 1000
+
+move z -2
+move x 0.2
+move z 2
+wait 1000
+endloop
+
+move z -2
+move x -1.2
+move z 2

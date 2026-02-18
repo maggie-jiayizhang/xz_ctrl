@@ -2,6 +2,7 @@
 #include <ctype.h>
 #include <string.h>
 #include <stdint.h>
+#include <math.h>
 
 /* =========================
    1) COMMAND TYPES & QUEUE
@@ -189,8 +190,14 @@ static bool parseFloat10000(const char *&p, long &out){
 }
 
 inline long mm_to_steps(float mm, bool isX){
+  // Keep a tiny per-axis residual so repeated small moves stay consistent (e.g., 0.12+0.88 == 1.00)
+  static float residualX = 0.0f;
+  static float residualZ = 0.0f;
   float stepsPerMM = isX ? STEPS_PER_MM_X : STEPS_PER_MM_Z;
-  return (long)(mm * stepsPerMM);
+  float accum = mm * stepsPerMM + (isX ? residualX : residualZ);
+  long steps = lroundf(accum);
+  if (isX) residualX = accum - steps; else residualZ = accum - steps;
+  return steps;
 }
 
 /* =========================

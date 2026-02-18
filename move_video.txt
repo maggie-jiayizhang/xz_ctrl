@@ -1,0 +1,48 @@
+wait 2000
+speed z 5 
+
+# repeatedly poke for 3 times
+loop 3 
+move z -0.9
+move z 1
+# wait for load cell
+wait 300
+move z -0.1
+
+wait 500
+endloop
+
+move z -2
+move x 1
+move z 2.1
+
+wait 2000
+speed z 5 
+
+# repeatedly poke for 3 times
+loop 3 
+move z -0.8
+move z 1
+# wait for load cell
+wait 300
+move z -0.2
+wait 500
+endloop
+
+move z -2.1
+move x -2
+move z 2.1
+
+# repeatedly poke for 3 times
+loop 3 
+move z -0.8
+move z 1
+# wait for load cell
+wait 300
+move z -0.2
+wait 500
+endloop
+
+move z -2.1
+move x 1
+move z 2

@@ -1,13 +1,13 @@
 wait 2000
-speed z 4 
+speed z 5 
 
 # repeatedly poke for 30 times
-loop 30 
-move z -0.7
+loop 25 
+move z -0.8
 move z 1
 # wait for load cell
 wait 100
-move z -0.3
+move z -0.2
 
 wait 500
 endloop
